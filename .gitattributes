@@ -1,0 +1,5 @@
+# Text is stored with LF; Windows launchers keep CRLF in the working tree.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.woff2 binary
