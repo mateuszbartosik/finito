@@ -1,8 +1,13 @@
 # Spent
 
-A week-first timesheet for YouTrack that runs on your own computer. Nothing gets installed in YouTrack: Spent talks to it with your personal token, the same way you would.
+A week-first timesheet for [YouTrack](https://www.jetbrains.com/youtrack/). Type your hours into a week, or log them in one line, and send them to YouTrack when the week looks right.
 
-Version 0.2.0 · 28 Oct 2026
+Spent runs on your own computer. Nothing gets installed in YouTrack: Spent talks to it with your personal token, the same way you would.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/spent-dark.png">
+  <img src="docs/spent-light.png" alt="Spent: a week of time per issue with a meter in each day's header, a suggested entry drawn dashed, and a glass bar at the bottom holding a running timer.">
+</picture>
 
 ## What it does
 
@@ -14,22 +19,25 @@ Version 0.2.0 · 28 Oct 2026
 
 ## Start
 
-You need Node.js 18.17 or newer (`node -v`). Nothing else: no `npm install`.
+You need [Node.js](https://nodejs.org) 20 or newer (`node -v`). Nothing else: no `npm install`.
 
-- **Windows:** double-click `start.cmd`.
-- **Anywhere:** `npm start` (or `node server.js --open`).
+```sh
+git clone https://github.com/mateuszbartosik/spent.git
+cd spent
+npm start
+```
 
-Spent opens <http://localhost:5178>. Keep its window open while you use it; Ctrl+C stops it.
+On Windows you can also double-click `start.cmd`. Spent opens <http://localhost:5178>. Keep its window open while you use it; Ctrl+C stops it.
 
 ## Connect YouTrack
 
 1. In YouTrack, open your avatar → **Profile** → **Account Security**.
 2. Under **Tokens**, choose **New token…**, name it "Spent", give it the **YouTrack** scope, and copy it.
-3. In Spent, enter the address and paste the token.
+3. In Spent, enter your YouTrack's address (for example `https://yourcompany.youtrack.cloud`) and paste the token.
 
 ## Try it without touching YouTrack
 
-Double-click `demo.cmd` (or `npm run demo`). It opens <http://localhost:5179> against a fake YouTrack with sample data and starts fresh every time.
+`npm run demo` (or double-click `demo.cmd`) opens <http://localhost:5179> against a fake YouTrack with sample data. It starts fresh every time.
 
 ## The bar
 
@@ -63,6 +71,8 @@ Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the
 - `data/config.json`: the YouTrack address and your token, in plain text. **Settings → Change** replaces them; deleting the file disconnects Spent. Keep the folder private, and revoke the token in YouTrack if this computer is ever lost.
 - `data/state.json`: drafts, edits that aren't submitted yet, the running timer and your settings. Submitted time lives only in YouTrack.
 
+Both are in `.gitignore`, so they stay out of commits.
+
 ## Safety
 
 - Spent listens on 127.0.0.1 only. Its API refuses requests without its own header and checks the Host and Origin, so other web pages can't drive it.
@@ -73,14 +83,20 @@ Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the
 
 | Problem | Fix |
 |---|---|
-| "Port 5178 is already in use" | Spent is probably already running: open <http://localhost:5178>. Or `set SPENT_PORT=5180` before starting. |
+| "Port 5178 is already in use" | Spent is probably already running: open <http://localhost:5178>. Or set `SPENT_PORT=5180` before starting. |
 | "Couldn't reach …" | Check the address, and your VPN if YouTrack needs one. |
 | "YouTrack turned the token down" | Make a new permanent token with the YouTrack scope. |
 | No suggestions | They need YouTrack's activity API (2020+). A note under the week shows the error if a request failed. |
-| Behind a proxy | Node doesn't use the system proxy. Set `NODE_USE_ENV_PROXY=1` and `HTTPS_PROXY` (Node 24+). |
+| Behind a proxy | Node doesn't use the system proxy. Set `NODE_USE_ENV_PROXY=1` and `HTTPS_PROXY` (Node 22.21 or newer). |
 
 ## Development
 
-- `npm test` runs the parser, suggestion and API tests against a fake YouTrack (`test/mock-youtrack.js`). No install needed.
+- `npm test` runs the parser, suggestion and API tests against a fake YouTrack (`test/mock-youtrack.js`). No install needed. CI runs them on Node 20, 22 and 24, and on Windows.
 - `server.js` starts `lib/app.js` (routes, storage, submit, timer, suggestions). `lib/youtrack.js` is the REST client.
-- The UI is `public/app.js` (Preact + htm, vendored in `public/vendor/`, no build step). `public/glass.js` draws the refraction. Fonts: Geist and Geist Mono (SIL Open Font License, `public/fonts/`).
+- The UI is `public/app.js` (Preact + htm, vendored in `public/vendor/`, no build step). `public/glass.js` draws the refraction.
+
+## License
+
+[MIT](LICENSE). Spent includes [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm) (MIT) and the [Geist](https://vercel.com/font) fonts (SIL Open Font License 1.1); their licenses sit next to them in `public/vendor/` and `public/fonts/`.
+
+Spent is not affiliated with JetBrains. YouTrack is a trademark of JetBrains s.r.o.
