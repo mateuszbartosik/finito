@@ -92,6 +92,15 @@ test('setup, week, edit, remove, submit, timer, suggestions', async () => {
     assert.equal(r.status, 200, r.text);
     assert.equal(r.body.type, 'Review');
     assert.equal(r.body.issue.idReadable, 'APP-1221');
+    assert.equal(r.body.keys.length, 1); // so the UI can undo it
+
+    // Undo: a fresh draft can be removed again by its key.
+    r = await t.call('POST', '/api/entries', { issue: 'APP-1221', dates: [today, today], minutes: 10 });
+    assert.equal(r.body.keys.length, 2);
+    for (const k of r.body.keys) {
+      const u = await t.call('POST', '/api/entries/' + encodeURIComponent('d:' + k) + '/remove', {});
+      assert.equal(u.status, 200, u.text);
+    }
 
     r = await t.call('POST', '/api/entries', { issue: 'APP-1221', dates: [today], minutes: 30, type: 'Design' });
     assert.equal(r.status, 400);
@@ -187,9 +196,22 @@ test('setup, week, edit, remove, submit, timer, suggestions', async () => {
     assert.equal(r.body.stopped[0].minutes, 5); // a short run counts as one rounding step
     r = await t.call('POST', '/api/timer/stop', { endAt: Date.now() + 47 * 60000 });
     assert.equal(r.body.stopped[0].minutes, 45);
+    assert.ok(r.body.stopped[0].key, 'stopped pieces carry their draft key');
     r = await t.call('POST', '/api/timer/start', { issue: 'APP-1215' });
     r = await t.call('POST', '/api/timer/stop', { discard: true });
     assert.equal(r.body.stopped.length, 0);
+
+    // A timer can carry a note and a type into its draft.
+    r = await t.call('POST', '/api/timer/start', { issue: 'APP-1215', text: 'pairing', type: 'rev' });
+    assert.equal(r.body.timer.text, 'pairing');
+    assert.equal(r.body.timer.type, 'Review');
+    r = await t.call('POST', '/api/timer/stop', {});
+    const timed = (await t.call('GET', '/api/week?start=' + monday)).body.entries.find((e) => e.key === 'd:' + r.body.stopped[0].key);
+    assert.equal(timed.text, 'pairing');
+    assert.equal(timed.type, 'Review');
+    await t.call('POST', '/api/entries/' + encodeURIComponent(timed.key) + '/remove', {});
+    r = await t.call('POST', '/api/timer/start', { issue: 'APP-1215', type: 'Design' });
+    assert.equal(r.status, 400);
 
     // Suggestions: activity on issues with no time that day.
     r = await t.call('GET', '/api/suggestions?start=' + monday);

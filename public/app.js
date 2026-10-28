@@ -1,7 +1,8 @@
 import { html, render, useState, useEffect, useLayoutEffect, useRef, useCallback } from './vendor/preact-htm.js';
 import { parseQuick, parseDuration, fmt, addDays, weekdayIndex, localDateOf, resolveTypeName, pad } from './parse.js';
+import { useGlass, useSheen } from './glass.js';
 
-// ---------- small helpers ----------
+// ---------- helpers ----------
 
 const enc = encodeURIComponent;
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -9,9 +10,17 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const dayNum = (date) => Number(date.slice(8, 10));
 const monthName = (date) => MONTHS[Number(date.slice(5, 7)) - 1];
 const dayLabel = (date) => `${DOW[weekdayIndex(date)]} ${dayNum(date)} ${monthName(date)}`;
+const shortDay = (date) => `${DOW[weekdayIndex(date)]} ${dayNum(date)}`;
 const mondayOf = (date) => addDays(date, -weekdayIndex(date));
 const hhmm = (ms) => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const cellId = (issue, date) => `cell-${issue}-${date}`;
+const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function focusEditor() {
+  const el = document.querySelector('.popover .ed-input') || document.querySelector('.popover');
+  if (el) el.focus();
+}
 
 function rangeLabel(dates) {
   const a = dates[0];
@@ -29,13 +38,6 @@ function localDateTimeMs(date, time) {
   const [y, m, d] = date.split('-').map(Number);
   const [hh, mm] = String(time || '18:00').split(':').map(Number);
   return new Date(y, m - 1, d, hh, mm).getTime();
-}
-
-const PALETTE = ['#2563eb', '#7c3aed', '#0f8a7e', '#c2410c', '#be185d', '#4d7c0f', '#0369a1', '#a16207'];
-function projectColor(key) {
-  let h = 0;
-  for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return PALETTE[h % PALETTE.length];
 }
 
 async function api(method, path, body) {
@@ -62,30 +64,64 @@ async function api(method, path, body) {
   return data;
 }
 
+// A number that glides to its new value.
+function useTween(value, ms = 420) {
+  const [shown, setShown] = useState(value);
+  const from = useRef(value);
+  useEffect(() => {
+    if (reduceMotion() || from.current === value) { from.current = value; setShown(value); return undefined; }
+    const start = performance.now();
+    const a = from.current;
+    let frame = requestAnimationFrame(function step(t) {
+      const k = Math.min(1, (t - start) / ms);
+      const e = 1 - Math.pow(1 - k, 3);
+      setShown(a + (value - a) * e);
+      if (k < 1) frame = requestAnimationFrame(step); else from.current = value;
+    });
+    return () => { cancelAnimationFrame(frame); from.current = value; };
+  }, [value]);
+  return shown;
+}
+
 // ---------- icons ----------
 
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
-  left: '<path d="M15 18l-6-6 6-6"/>',
-  right: '<path d="M9 18l6-6-6-6"/>',
-  play: '<path d="M7 4.5v15l12.5-7.5z" fill="currentColor" stroke="none"/>',
-  stop: '<rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/>',
+  left: '<path d="M14.5 6l-6 6 6 6"/>',
+  right: '<path d="M9.5 6l6 6-6 6"/>',
+  play: '<path d="M8 5.2v13.6a.8.8 0 0 0 1.2.7l10.8-6.8a.8.8 0 0 0 0-1.4L9.2 4.5A.8.8 0 0 0 8 5.2z" fill="currentColor" stroke="none"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-  x: '<path d="M6 6l12 12M18 6L6 18"/>',
-  warn: '<path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
-  bang: '<path d="M12 6v8M12 18h.01"/>',
-  info: '<path d="M12 11v7M12 6.5h.01"/>',
-  activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
-  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" fill="currentColor" stroke="none"/>',
-  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
+  x: '<path d="M7 7l10 10M17 7L7 17"/>',
+  sparkle: '<path d="M12 3.5l1.6 4.6a2 2 0 0 0 1.3 1.3l4.6 1.6-4.6 1.6a2 2 0 0 0-1.3 1.3L12 18.5l-1.6-4.6a2 2 0 0 0-1.3-1.3L4.5 11l4.6-1.6a2 2 0 0 0 1.3-1.3z"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
-  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
-  watch: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M9.5 2.5h5"/>',
+  arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/>',
+  enter: '<path d="M19 6v5a3 3 0 0 1-3 3H6M10 10l-4 4 4 4"/>',
+  warn: '<path d="M12 4.5L2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2h.01"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
 };
 
 function Icon({ name, size = 16, stroke = 2 }) {
-  return html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=${stroke} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{ __html: ICONS[name] }}></svg>`;
+  return html`<svg class="icon" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=${stroke} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{ __html: ICONS[name] }}></svg>`;
+}
+
+// A piece of the control layer: frosted everywhere, refracting where the browser can.
+function Glass({ as = 'div', refract = true, radius, bezel, scale, blur, sheen, innerRef, class: cls = '', children, ...rest }) {
+  const own = useRef(null);
+  const ref = innerRef || own;
+  useGlass(ref, refract ? { radius, bezel, scale, blur } : null);
+  const Tag = as;
+  return html`<${Tag} ref=${ref} class=${'glass ' + cls} ...${rest}>${sheen ? html`<${Sheen} target=${ref} />` : null}${children}<//>`;
+}
+function Sheen({ target }) { useSheen(target); return null; }
+
+function Mark({ size = 28 }) {
+  return html`<span class="mark" style=${{ width: size + 'px', height: size + 'px' }} aria-hidden="true">
+    <svg viewBox="0 0 32 32" width=${size} height=${size}><circle cx="16" cy="17" r="10.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M16 17V11.5M13 3.5h6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+  </span>`;
 }
 
 // ---------- app shell ----------
@@ -97,8 +133,9 @@ function App() {
     api('GET', '/status').then(setStatus).catch((e) => setStatus({ configured: false, error: e.message, offline: true }));
   }, []);
   const onReconnect = useCallback(() => setReconnect(true), []);
-  if (!status) return html`<div class="boot">Loading…</div>`;
-  if (status.offline) return html`<div class="boot"><div class="card boot-card"><p>${status.error}</p></div></div>`;
+  const onUnauthorized = useCallback(() => setStatus((s) => ({ ...s, ytStatus: 401 })), []);
+  if (!status) return html`<div class="boot"><span class="spinner" aria-label="Loading"></span></div>`;
+  if (status.offline) return html`<div class="boot"><div class="panel boot-card"><p>${status.error}</p></div></div>`;
   const tokenDead = status.configured && status.ytStatus === 401;
   if (!status.configured || tokenDead || reconnect) {
     return html`<${Setup}
@@ -108,11 +145,7 @@ function App() {
       onDone=${(s) => { setStatus(s); setReconnect(false); }}
     />`;
   }
-  return html`<${Main} status=${status} onReconnect=${onReconnect} />`;
-}
-
-function Brand() {
-  return html`<span class="brand"><span class="glyph"><${Icon} name="watch" size=${15} stroke=${2.2} /></span><strong>Spent</strong></span>`;
+  return html`<${Main} status=${status} onReconnect=${onReconnect} onUnauthorized=${onUnauthorized} />`;
 }
 
 function Setup({ status, canCancel, onCancel, onDone }) {
@@ -136,87 +169,114 @@ function Setup({ status, canCancel, onCancel, onDone }) {
   let origin = null;
   try { origin = new URL(/^https?:/i.test(url) ? url : 'https://' + url).origin; } catch (_) { /* not yet a URL */ }
   return html`<div class="setup-wrap">
-    <form class="card setup" onSubmit=${submit}>
-      <${Brand} />
+    <${Glass} as="form" class="setup glass-strong" radius=${30} bezel=${22} scale=${26} blur=${12} onSubmit=${submit}>
+      <${Mark} size=${40} />
       <h1>Connect YouTrack</h1>
-      <p class="muted">Spent runs on this computer and talks to YouTrack as you, with a permanent token. The token stays in Spent's <code>data</code> folder and never reaches the browser.</p>
-      <label for="url">YouTrack address</label>
-      <input id="url" class="field" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="https://youtrack.example.com" required />
-      <label for="token">Permanent token</label>
-      <input id="token" class="field" type="password" value=${token} onInput=${(e) => setToken(e.target.value)} placeholder=${status.configured ? 'Leave empty to keep the saved token' : 'perm:…'} autocomplete="off" />
+      <p class="sub">Spent runs on this computer and logs time as you. Your token stays here.</p>
+      <label class="field">
+        <span>Address</span>
+        <input id="url" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="https://youtrack.example.com" required />
+      </label>
+      <label class="field">
+        <span>Permanent token</span>
+        <input id="token" type="password" value=${token} onInput=${(e) => setToken(e.target.value)} placeholder=${status.configured ? 'Leave empty to keep the saved one' : 'perm:…'} autocomplete="off" />
+      </label>
       <details class="howto">
-        <summary>How to get a token</summary>
+        <summary>Where do I get a token?</summary>
         <ol>
-          <li>In YouTrack, open your avatar, then <b>Profile</b> → <b>Account Security</b>.</li>
-          <li>Under <b>Tokens</b>, choose <b>New token…</b>, call it “Spent” and give it the <b>YouTrack</b> scope.</li>
-          <li>Copy it straight away (YouTrack shows it once) and paste it here.</li>
+          <li>In YouTrack: your avatar → <b>Profile</b> → <b>Account Security</b>.</li>
+          <li><b>New token…</b>, name it “Spent”, scope <b>YouTrack</b>.</li>
+          <li>Copy it now (YouTrack shows it once) and paste it here.</li>
         </ol>
-        ${origin ? html`<p><a href=${origin + '/users/me'} target="_blank" rel="noopener noreferrer">Open my YouTrack profile <${Icon} name="external" size=${12} /></a></p>` : null}
+        ${origin ? html`<a href=${origin + '/users/me'} target="_blank" rel="noopener noreferrer">Open my YouTrack profile <${Icon} name="external" size=${12} /></a>` : null}
       </details>
       ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
-      <div class="row-end">
+      <div class="actions">
         ${canCancel ? html`<button type="button" class="btn" onClick=${onCancel}>Cancel</button>` : null}
-        <button class="btn btn-primary" disabled=${busy}>${busy ? 'Checking…' : 'Connect'}</button>
+        <button class="btn btn-accent" disabled=${busy}>${busy ? 'Checking…' : 'Connect'}</button>
       </div>
-    </form>
+    <//>
   </div>`;
 }
 
 // ---------- main screen ----------
 
-function Main({ status, onReconnect }) {
+function Main({ status, onReconnect, onUnauthorized }) {
   const [week, setWeek] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [mine, setMine] = useState([]);
-  const [sugg, setSugg] = useState({ loading: true, items: [], errors: [] });
-  const [editing, setEditingState] = useState(null);
-  const editingRef = useRef(null);
-  const [sel, setSel] = useState(null);
-  const [rail, setRail] = useState('suggest');
+  const [sugg, setSugg] = useState({ loading: true, items: [], errors: [], monday: null });
+  const [edit, setEdit] = useState(null);
+  const [timerPop, setTimerPop] = useState(false);
   const [toast, setToast] = useState(null);
   const [sheet, setSheet] = useState(null);
-  const [addRow, setAddRow] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [q, setQ] = useState('');
   const [lookups, setLookups] = useState({});
   const toastTimer = useRef(null);
   const weekRef = useRef(null);
-  weekRef.current = week;
+  const editorRef = useRef(null);
+  const askedAboutTimer = useRef(false);
+  const lastSugg = useRef(0);
+  const queue = useRef(Promise.resolve());
+  const inflight = useRef(new Set());
+  const dockBusy = useRef(false);
+  if (week) weekRef.current = week;
 
-  const setEditing = (v) => { editingRef.current = v; setEditingState(v); };
-
-  const flash = useCallback((msg, kind = 'info') => {
+  const flash = useCallback((msg, kind = 'info', action = null) => {
     clearTimeout(toastTimer.current);
-    setToast({ msg, kind });
-    toastTimer.current = setTimeout(() => setToast(null), kind === 'error' ? 7000 : 3500);
+    setToast({ msg, kind, action, id: Date.now() });
+    toastTimer.current = setTimeout(() => setToast(null), kind === 'error' ? 7000 : action ? 6000 : 3200);
   }, []);
 
+  // Only the latest request for the week (or its suggestions) may land.
+  const weekSeq = useRef(0);
+  const suggSeq = useRef(0);
   const load = useCallback(async (start, fresh) => {
+    const n = ++weekSeq.current;
     try {
       const w = await api('GET', `/week?start=${start || ''}${fresh ? '&fresh=1' : ''}`);
+      if (n !== weekSeq.current) return null;
+      weekRef.current = w;
       setWeek(w);
       setLoadError(null);
       return w;
     } catch (e) {
-      if (e.status === 401) { onReconnect(); return null; }
+      if (n !== weekSeq.current) return null;
+      if (e.status === 401) { onUnauthorized(); return null; }
       setLoadError(e.message);
       return null;
     }
-  }, [onReconnect]);
+  }, [onUnauthorized]);
 
   const loadSugg = useCallback(async (start) => {
-    setSugg((s) => ({ ...s, loading: true }));
+    const n = ++suggSeq.current;
+    lastSugg.current = Date.now();
+    setSugg((s) => ({ ...s, loading: true, monday: start }));
     try {
       const r = await api('GET', `/suggestions?start=${start}`);
-      setSugg({ loading: false, items: r.suggestions || [], errors: r.errors || [] });
+      if (n === suggSeq.current) setSugg({ loading: false, items: r.suggestions || [], errors: r.errors || [], monday: start });
     } catch (e) {
-      setSugg({ loading: false, items: [], errors: [e.message] });
+      if (n === suggSeq.current) setSugg({ loading: false, items: [], errors: [e.message], monday: start });
     }
   }, []);
 
   useEffect(() => {
     load(null).then((w) => w && loadSugg(w.monday));
     api('GET', '/issues/mine').then((r) => setMine(r.issues || [])).catch(() => {});
+  }, []);
+
+  // Coming back to the tab picks up what changed in YouTrack meanwhile.
+  useEffect(() => {
+    const onVis = () => {
+      const w = weekRef.current;
+      if (document.visibilityState !== 'visible' || !w) return;
+      load(w.monday);
+      if (Date.now() - lastSugg.current > 5 * 60 * 1000) loadSugg(w.monday);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
   const timerStart = week && week.timer ? week.timer.startedAt : null;
@@ -230,7 +290,7 @@ function Main({ status, onReconnect }) {
   useEffect(() => {
     const onKey = (e) => {
       const tag = document.activeElement ? document.activeElement.tagName : '';
-      if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(tag) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(tag) && !e.ctrlKey && !e.metaKey && !e.altKey && !document.querySelector('.scrim')) {
         e.preventDefault();
         const el = document.getElementById('qe');
         if (el) el.focus();
@@ -240,7 +300,7 @@ function Main({ status, onReconnect }) {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // Look up an issue ID typed in quick entry that we don't know yet.
+  // Look up an issue ID typed in the dock that we don't know yet.
   useEffect(() => {
     const w = weekRef.current;
     if (!w || !q.trim()) return undefined;
@@ -257,17 +317,22 @@ function Main({ status, onReconnect }) {
     return () => clearTimeout(t);
   }, [q]);
 
+  // A timer left running overnight asks what to do, once.
+  const longRunCheck = week && week.timer && (localDateOf(week.timer.startedAt) < week.today || Date.now() - week.timer.startedAt > 10 * 3600 * 1000);
+  useEffect(() => {
+    if (longRunCheck && !askedAboutTimer.current) { askedAboutTimer.current = true; setTimerPop(true); }
+  }, [longRunCheck]);
+
   if (!week) {
     return html`<div class="boot">${loadError
-      ? html`<div class="card boot-card"><p>${loadError}</p><button class="btn" onClick=${() => load(null)}>Try again</button></div>`
-      : 'Loading your week…'}</div>`;
+      ? html`<div class="panel boot-card"><p>${loadError}</p><button class="btn" onClick=${() => load(null)}>Try again</button></div>`
+      : html`<span class="spinner" aria-label="Loading your week"></span>`}</div>`;
   }
 
   // ---- derived data ----
   const { dates, today, entries, issues, projects, settings } = week;
   const target = settings.dailyTargetMinutes;
   const isWorkDay = (d) => settings.workDays.includes((weekdayIndex(d) + 1) % 7);
-  const workDayCount = dates.filter(isWorkDay).length;
   const cells = new Map();
   for (const e of entries) {
     const k = e.issue + '|' + e.date;
@@ -282,14 +347,33 @@ function Main({ status, onReconnect }) {
   const timer = week.timer;
   const timerMin = timer ? Math.max(0, (now - timer.startedAt) / 60000) : 0;
   const timerDate = timer ? localDateOf(timer.startedAt) : null;
+  const timerPieces = [];
+  if (timer) {
+    for (let from = timer.startedAt; from < now;) {
+      const d = localDateOf(from);
+      const to = Math.min(now, localDateTimeMs(addDays(d, 1), '00:00'));
+      timerPieces.push({ date: d, minutes: (to - from) / 60000 });
+      from = to;
+    }
+  }
+  const runningOn = (date) => { const piece = timerPieces.find((x) => x.date === date); return piece ? piece.minutes : 0; };
   const thisMonday = mondayOf(today);
   const isThisWeek = week.monday === thisMonday;
+  const suggestions = sugg.monday === week.monday ? sugg.items.filter((s) => dates.includes(s.date)) : [];
 
   const rowIds = [];
   const pushRow = (id) => { if (id && !rowIds.includes(id)) rowIds.push(id); };
   week.rows.forEach(pushRow);
   [...entries].sort((a, b) => (a.date === b.date ? a.issue.localeCompare(b.issue) : a.date < b.date ? -1 : 1)).forEach((e) => pushRow(e.issue));
-  if (timer && dates.includes(timerDate)) pushRow(timer.issue);
+  if (timer && timerPieces.some((x) => dates.includes(x.date))) pushRow(timer.issue);
+  const ghostIds = [];
+  for (const s of suggestions) if (!rowIds.includes(s.issue) && !ghostIds.includes(s.issue)) ghostIds.push(s.issue);
+  const suggAt = (issue, date) => suggestions.find((s) => s.issue === issue && s.date === date);
+
+  // Days off stay hidden unless something happened on them.
+  let cols = dates.filter((d, i) => isWorkDay(d) || dayTotals[i] > 0 || entries.some((e) => e.date === d)
+    || runningOn(d) > 0 || suggestions.some((s) => s.date === d));
+  if (!cols.length) cols = dates;
 
   const known = [];
   const seenIds = new Set();
@@ -298,6 +382,12 @@ function Main({ status, onReconnect }) {
   }
   for (const l of Object.values(lookups)) if (l.ok && !seenIds.has(l.issue.idReadable)) { known.push(l.issue); seenIds.add(l.issue.idReadable); }
   for (const i of mine) if (!seenIds.has(i.idReadable)) { known.push(i); seenIds.add(i.idReadable); }
+  for (const s of suggestions) {
+    if (seenIds.has(s.issue)) continue;
+    const project = typeof s.project === 'string' ? (projects[s.project] || { shortName: s.project, name: s.project }) : s.project || null;
+    known.push({ idReadable: s.issue, summary: s.summary, project });
+    seenIds.add(s.issue);
+  }
 
   const issueInfo = (id) => issues[id] || known.find((i) => i.idReadable === id) || { idReadable: id, summary: '' };
   const projectOf = (id) => { const i = issueInfo(id); return i.project ? projects[i.project.shortName] || i.project : null; };
@@ -308,9 +398,8 @@ function Main({ status, onReconnect }) {
   // ---- actions ----
   const reload = () => load(week.monday);
   const go = async (start) => {
-    setEditing(null);
-    setSel(null);
-    setAddRow(false);
+    setEdit(null);
+    setAdding(false);
     const w = await load(start);
     if (w) loadSugg(w.monday);
   };
@@ -318,131 +407,158 @@ function Main({ status, onReconnect }) {
     try {
       const r = await fn();
       await reload();
-      if (message) flash(typeof message === 'function' ? message(r) : message);
+      if (message) {
+        const m = typeof message === 'function' ? message(r) : message;
+        if (m) Array.isArray(m) ? flash(...m) : flash(m);
+      }
       return r || true;
     } catch (e) {
-      if (e.status === 401) { onReconnect(); return null; }
+      if (e.status === 401) { onUnauthorized(); return null; }
       flash(e.message, 'error');
       await reload();
       return null;
     }
+  };
+  // Writes go one at a time, each against the latest week.
+  const serial = (fn) => {
+    const next = queue.current.then(fn, fn);
+    queue.current = next.catch(() => {});
+    return next;
   };
 
   const baseOf = (e) => Object.assign({ issue: e.issue, issueDbId: e.issueDbId, date: e.date }, e.base || { minutes: e.minutes, type: e.type, text: e.text });
   const patchRaw = (e, changes) => api('PATCH', '/entries/' + enc(e.key), Object.assign({}, changes, { base: baseOf(e) }));
   const removeRaw = (e) => api('POST', `/entries/${enc(e.key)}/remove`, { snapshot: baseOf(e) });
   const restoreRaw = (e) => api('POST', `/entries/${enc(e.key)}/restore`, {});
-
-  const startEdit = (issue, date) => {
-    const cur = sum(liveOf(cellEntries(issue, date)));
-    setEditing({ issue, date, text: cur ? fmt(cur) : '' });
-    setSel({ issue, date });
-    setRail('details');
+  const undoDrafts = (keys) => async () => {
+    setToast(null);
+    await run(async () => { for (const k of keys) await api('POST', `/entries/${enc('d:' + k)}/remove`, {}); }, 'Undone');
   };
+  const forgetSugg = (list) => setSugg((st) => ({ ...st, items: st.items.filter((x) => !list.some((s) => s.id === x.id)) }));
 
-  const commitEdit = async (next) => {
-    const ed = editingRef.current;
-    if (!ed) return;
-    if (next) {
-      const cur = sum(liveOf(cellEntries(next.issue, next.date)));
-      setEditing({ issue: next.issue, date: next.date, text: cur ? fmt(cur) : '' });
-      setSel(next);
-    } else setEditing(null);
-    const min = parseDuration(ed.text);
-    if (min === null || min > 1440) { flash(`Couldn't read “${ed.text}”. Try 1.5, 1h30 or 90m.`, 'error'); return; }
-    const here = cellEntries(ed.issue, ed.date);
+  // Write a cell's total. Returns false when the text can't be read.
+  const commitCell = (issue, date, text, extra = {}) => {
+    const min = parseDuration(text);
+    if (min === null || min > 1440) { flash(`Couldn't read “${text}”. Try 1.5, 1h30 or 90m.`, 'error'); return Promise.resolve(false); }
+    const s = suggAt(issue, date);
+    return serial(() => writeCell(issue, date, min, extra, s));
+  };
+  const writeCell = async (issue, date, min, extra, s) => {
+    const latest = weekRef.current || week;
+    const here = latest.entries.filter((e) => e.issue === issue && e.date === date);
     const lv = liveOf(here);
     const cur = sum(lv);
-    if (min === cur) return;
+    if (min === cur) return true;
     await run(async () => {
-      if (min === 0) { for (const e of lv) await removeRaw(e); return; }
+      if (min === 0) { for (const e of lv) await removeRaw(e); return null; }
       if (!lv.length) {
         const gone = here.find((e) => e.status === 'deleted');
-        if (gone) { await restoreRaw(gone); await patchRaw(gone, { minutes: min }); return; }
-        await api('POST', '/entries', { issue: ed.issue, dates: [ed.date], minutes: min });
-        return;
+        if (gone) { await restoreRaw(gone); await patchRaw(gone, { minutes: min }); return null; }
+        const body = { issue, dates: [date], minutes: min };
+        if (extra.type !== undefined) body.type = extra.type;
+        if (extra.text) body.text = extra.text;
+        const r = await api('POST', '/entries', body);
+        if (s) forgetSugg([s]);
+        return r;
       }
       const last = lv[lv.length - 1];
       const nm = last.minutes + (min - cur);
-      if (nm <= 0) throw new Error('This cell holds several work items. Change them one by one in Details.');
+      if (nm <= 0) throw new Error('This cell holds several work items. Change them one by one.');
       await patchRaw(last, { minutes: nm });
+      return null;
     });
+    return true;
   };
 
   const nextCell = (issue, date, key, shift) => {
-    const di = dates.indexOf(date);
-    const ri = rowIds.indexOf(issue);
+    const all = [...rowIds, ...ghostIds];
+    const di = cols.indexOf(date);
+    const ri = all.indexOf(issue);
     if (key === 'Tab') {
       const nd = di + (shift ? -1 : 1);
-      if (nd >= 0 && nd < 7) return { issue, date: dates[nd] };
+      if (nd >= 0 && nd < cols.length) return { issue, date: cols[nd] };
       const nr = ri + (shift ? -1 : 1);
-      if (nr >= 0 && nr < rowIds.length) return { issue: rowIds[nr], date: dates[shift ? 6 : 0] };
+      if (nr >= 0 && nr < all.length) return { issue: all[nr], date: cols[shift ? cols.length - 1 : 0] };
       return null;
     }
     const nr = ri + (key === 'ArrowDown' ? 1 : -1);
-    return nr >= 0 && nr < rowIds.length ? { issue: rowIds[nr], date } : null;
+    return nr >= 0 && nr < all.length ? { issue: all[nr], date } : null;
   };
 
-  const onCellKey = (e, issue, date) => {
-    if (e.key === 'Enter') { e.preventDefault(); commitEdit(null); return; }
-    if (e.key === 'Escape') { e.preventDefault(); setEditing(null); return; }
-    if (e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const next = nextCell(issue, date, e.key, e.shiftKey);
-      if (next) e.preventDefault();
-      commitEdit(next);
-    }
+  const openEditor = (issue, date, initial) => {
+    setTimerPop(false);
+    setEdit({ issue, date, initial: initial === undefined ? null : initial, n: Date.now() });
+  };
+  // Give focus back to the cell, unless it has already gone somewhere on purpose.
+  const focusCell = (c) => setTimeout(() => {
+    const a = document.activeElement;
+    if (a && a !== document.body) return;
+    const n = document.getElementById(cellId(c.issue, c.date));
+    if (n) n.focus();
+  }, 0);
+  const closeEditor = async (commit = true, refocus = false) => {
+    const ed = editorRef.current;
+    const was = edit;
+    setEdit(null);
+    if (refocus && was) focusCell(was);
+    if (ed) await (commit ? ed.commit() : ed.cancel());
   };
 
   const timerMessage = (r) => {
-    const logged = (r.stopped || []).map((s) => `${fmt(s.minutes)} to ${s.issue}${s.date !== today ? ' on ' + dayLabel(s.date) : ''}`).join(', ');
-    if (r.timer) return logged ? `Logged ${logged} as a draft · timer started on ${r.timer.issue}` : `Timer started on ${r.timer.issue}`;
-    return logged ? `Logged ${logged} as a draft` : 'Timer discarded';
+    const logged = (r.stopped || []).map((s) => `${fmt(s.minutes)} to ${s.issue}${s.date !== today ? ' on ' + shortDay(s.date) : ''}`).join(', ');
+    const keys = (r.stopped || []).map((s) => s.key).filter(Boolean);
+    if (r.timer) return logged ? [`Logged ${logged} · timer on ${r.timer.issue}`, 'info', keys.length ? { label: 'Undo', fn: undoDrafts(keys) } : null] : `Timer started on ${r.timer.issue}`;
+    return logged ? [`Logged ${logged}`, 'info', keys.length ? { label: 'Undo', fn: undoDrafts(keys) } : null] : 'Timer discarded';
   };
-  const toggleTimer = (issue) => run(
-    () => (timer && timer.issue === issue ? api('POST', '/timer/stop', {}) : api('POST', '/timer/start', { issue })),
-    timerMessage,
-  );
-  const stopTimer = (body = {}) => run(() => api('POST', '/timer/stop', body), timerMessage);
+  const startTimer = (issue, extra = {}) => serial(() => run(() => api('POST', '/timer/start', Object.assign({ issue }, extra)), timerMessage));
+  const stopTimer = (body = {}) => { setTimerPop(false); return serial(() => run(() => api('POST', '/timer/stop', body), timerMessage)); };
 
-  const acceptSuggestions = async (list) => {
-    const r = await run(async () => {
-      for (const s of list) await api('POST', '/entries', { issue: s.issue, dates: [s.date], minutes: s.minutes });
-    }, () => `Added ${fmt(list.reduce((a, s) => a + s.minutes, 0))} from ${plural(list.length, 'suggestion', 'suggestions')} as drafts`);
-    if (r) setSugg((st) => ({ ...st, items: st.items.filter((x) => !list.some((s) => s.id === x.id)) }));
+  const acceptSuggestions = async (all) => {
+    const list = all.filter((s) => !inflight.current.has(s.id));
+    if (!list.length) return;
+    for (const s of list) inflight.current.add(s.id);
+    forgetSugg(list);
+    const r = await serial(() => run(async () => {
+      const keys = [];
+      for (const s of list) {
+        const res = await api('POST', '/entries', { issue: s.issue, dates: [s.date], minutes: s.minutes });
+        keys.push(...(res.keys || []));
+      }
+      return keys;
+    }, (keys) => [`Added ${fmt(list.reduce((a, s) => a + s.minutes, 0))}${list.length > 1 ? ` from ${list.length} suggestions` : ` to ${list[0].issue}`}`, 'info', { label: 'Undo', fn: undoDrafts(keys) }]));
+    for (const s of list) inflight.current.delete(s.id);
+    if (!r) loadSugg(week.monday);
   };
   const dismissSuggestion = (s) => {
-    setSugg((st) => ({ ...st, items: st.items.filter((x) => x.id !== s.id) }));
+    forgetSugg([s]);
     api('POST', '/suggestions/dismiss', { id: s.id }).catch(() => {});
   };
 
-  // ---- quick entry ----
+  // ---- dock: one line in, one action out ----
   const parsed = parseQuick(q, { dates, today, issues: known });
-  let chips = [];
-  let qValid = false;
-  let qHint = '';
+  const tokens = [];
+  let action = null;
   let qType;
+  let canonical = null;
   if (parsed) {
     const lk = parsed.issue && !parsed.issueKnown ? lookups[parsed.issue.toLowerCase()] : null;
     const issueOk = !!parsed.issue && (parsed.issueKnown || (lk && lk.ok));
-    const canonical = parsed.issue && lk && lk.ok ? lk.issue.idReadable : parsed.issue;
+    canonical = parsed.issue && lk && lk.ok ? lk.issue.idReadable : parsed.issue;
     const summary = parsed.summary || (lk && lk.ok ? lk.issue.summary : '');
-    if (!parsed.issue) chips.push({ label: 'Issue?', sub: parsed.ambiguous ? 'several titles match; add the ID' : 'type an ID or words from its title', cls: 'err' });
-    else if (issueOk) chips.push({ label: canonical, sub: summary + (parsed.by ? ` · matched “${parsed.by}”` : ''), cls: 'ok' });
-    else if (lk && !lk.ok) chips.push({ label: parsed.issue, sub: lk.error, cls: 'err' });
-    else chips.push({ label: parsed.issue, sub: 'checking…', cls: '' });
+    if (!parsed.issue) tokens.push({ label: 'Which issue?', sub: parsed.ambiguous ? 'several titles match' : 'an ID or words from its title', cls: 'err' });
+    else if (issueOk) tokens.push({ label: canonical, sub: summary, cls: 'issue', mono: true });
+    else if (lk && !lk.ok) tokens.push({ label: parsed.issue, sub: lk.error, cls: 'err', mono: true });
+    else tokens.push({ label: parsed.issue, sub: 'looking it up…', cls: '', mono: true });
 
-    chips.push(parsed.minutes && parsed.minutes <= 1440
-      ? { label: fmt(parsed.minutes), sub: parsed.range || '', cls: 'ok' }
-      : { label: 'Time?', sub: 'e.g. 1.5, 1h30, 90m, 9:00–10:30', cls: 'err' });
+    const hasTime = parsed.minutes > 0 && parsed.minutes <= 1440;
+    if (hasTime) tokens.push({ label: fmt(parsed.minutes), sub: parsed.range || '', cls: 'ok' });
 
-    if (parsed.dayError) chips.push({ label: 'Day?', sub: parsed.dayError, cls: 'err' });
-    else {
+    if (parsed.dayError) tokens.push({ label: 'Which day?', sub: parsed.dayError, cls: 'err' });
+    else if (hasTime) {
       const ds = parsed.dates;
-      const label = ds.length > 1
-        ? `${DOW[weekdayIndex(ds[0])]}–${DOW[weekdayIndex(ds[ds.length - 1])]}`
-        : dayLabel(ds[0]) + (ds[0] === today ? ' · today' : ds[0] === addDays(today, -1) ? ' · yesterday' : '');
+      const label = ds.length > 1 ? `${DOW[weekdayIndex(ds[0])]}–${DOW[weekdayIndex(ds[ds.length - 1])]}` : ds[0] === today ? 'Today' : ds[0] === addDays(today, -1) ? 'Yesterday' : shortDay(ds[0]);
       const outside = ds.some((d) => !dates.includes(d));
-      chips.push({ label, sub: ds.length > 1 ? plural(ds.length, 'work item', 'work items') : outside ? 'not in this week' : '', cls: outside ? 'warn' : 'ok' });
+      tokens.push({ label, sub: ds.length > 1 ? plural(ds.length, 'item', 'items') : outside ? 'another week' : '', cls: outside ? 'warn' : '' });
     }
 
     let typeErr = false;
@@ -450,432 +566,682 @@ function Main({ status, onReconnect }) {
       const types = typesFor(canonical);
       if (parsed.type) {
         const t = resolveTypeName(parsed.type, types);
-        if (t.error) { typeErr = true; chips.push({ label: 'Type?', sub: t.error, cls: 'err' }); } else { qType = t.name; chips.push({ label: t.name, sub: t.unchecked ? 'checked when added' : 'work type', cls: 'ok' }); }
+        if (t.error) { typeErr = true; tokens.push({ label: `#${parsed.type}`, sub: t.error, cls: 'err' }); } else { qType = t.name; tokens.push({ label: t.name, sub: '', cls: '' }); }
       } else {
         const def = defaultTypeFor(canonical);
-        chips.push(def ? { label: def, sub: 'your default here', cls: '' } : { label: 'No type', sub: 'set a default in Settings', cls: '' });
+        if (def) tokens.push({ label: def, sub: '', cls: 'quiet' });
       }
     }
-    if (parsed.note) chips.push({ label: `“${parsed.note}”`, sub: 'note', cls: '' });
-    if (issueOk && parsed.dates) {
+    if (parsed.note) tokens.push({ label: `“${parsed.note}”`, sub: '', cls: 'quiet' });
+    if (issueOk && hasTime && parsed.dates) {
       const dup = parsed.dates.filter((d) => sum(liveOf(cellEntries(canonical, d))) > 0);
-      if (dup.length) chips.push({ label: `Adds to time already on ${dup.map((d) => DOW[weekdayIndex(d)]).join(', ')}`, sub: '', cls: 'warn' });
+      if (dup.length) tokens.push({ label: `adds to ${dup.map((d) => DOW[weekdayIndex(d)]).join(', ')}`, sub: '', cls: 'warn' });
     }
-    qValid = issueOk && parsed.minutes > 0 && parsed.minutes <= 1440 && !!parsed.dates && !typeErr;
-    qHint = qValid ? 'Enter adds it as a draft' : '';
-    if (issueOk) parsed.issue = canonical;
+    if (issueOk && !typeErr && !parsed.dayError && hasTime && parsed.dates) action = 'log';
+    else if (issueOk && !typeErr && !parsed.minutes && !parsed.range) action = 'start';
   }
 
-  const addFromQuick = async () => {
-    if (!qValid) return;
+  const submitDock = async () => {
+    if (!parsed || dockBusy.current) return;
     const p = parsed;
-    const body = { issue: p.issue, dates: p.dates, minutes: p.minutes, text: p.note };
-    if (qType) body.type = qType;
-    const r = await run(() => api('POST', '/entries', body), (res) => {
-      const outside = p.dates.some((d) => !dates.includes(d));
-      return `Added ${fmt(p.minutes)}${p.dates.length > 1 ? ` × ${p.dates.length} days` : ''} to ${res.issue.idReadable} as a draft${res.type ? ' · ' + res.type : ''}${outside ? ' (in another week)' : ''}`;
-    });
-    if (r) {
-      setQ('');
-      if (dates.includes(p.dates[0])) setSel({ issue: r.issue.idReadable, date: p.dates[0] });
+    if (action !== 'log' && action !== 'start') {
+      const bad = tokens.find((t) => t.cls === 'err');
+      flash(bad ? `${bad.label} ${bad.sub}` : 'Add a time, like 1h30 or 90m.', 'error');
+      return;
     }
+    dockBusy.current = true;
+    const line = q;
+    setQ('');
+    let r;
+    if (action === 'start') {
+      const extra = {};
+      if (p.note) extra.text = p.note;
+      if (qType) extra.type = qType;
+      r = await startTimer(canonical, extra);
+    } else {
+      const body = { issue: canonical, dates: p.dates, minutes: p.minutes, text: p.note };
+      if (qType) body.type = qType;
+      r = await serial(() => run(() => api('POST', '/entries', body), (res) => {
+        const outside = p.dates.some((d) => !dates.includes(d));
+        return [`Logged ${fmt(p.minutes)}${p.dates.length > 1 ? ` × ${p.dates.length}` : ''} to ${res.issue.idReadable}${outside ? ' (another week)' : ''}`, 'info', { label: 'Undo', fn: undoDrafts(res.keys || []) }];
+      }));
+    }
+    dockBusy.current = false;
+    if (!r) setQ((cur) => cur || line); // give the line back if it didn't go through
   };
 
-  // ---- pieces ----
+  // ---- week figures ----
   const weekTitle = isThisWeek ? 'This week'
     : week.monday === addDays(thisMonday, -7) ? 'Last week'
       : week.monday === addDays(thisMonday, 7) ? 'Next week'
-        : `Week of ${dayNum(week.monday)} ${monthName(week.monday)}`;
-  const weekTarget = target * workDayCount;
-  const pct = weekTarget ? Math.min(100, Math.round((weekTotal / weekTarget) * 100)) : 0;
+        : `${dayNum(week.monday)} ${monthName(week.monday)}`;
+  const weekTarget = target * dates.filter(isWorkDay).length;
   const longRun = timer && (timerDate < today || now - timer.startedAt > 10 * 3600 * 1000);
-  const trimAt = timer ? localDateTimeMs(timerDate, settings.dayEnds) : 0;
-  const showTrim = timer && trimAt > timer.startedAt && trimAt < now;
-
-  const header = html`<div class="topline">
-    <div class="weeknav">
-      <button class="btn btn-ghost btn-icon" aria-label="Previous week" onClick=${() => go(addDays(week.monday, -7))}><${Icon} name="left" /></button>
-      <div class="weektitle">
-        <h1>${weekTitle}</h1>
-        <div class="muted small">${rangeLabel(dates)}${isThisWeek ? ` · today is ${dayLabel(today)}` : ''}</div>
-      </div>
-      <button class="btn btn-ghost btn-icon" aria-label="Next week" onClick=${() => go(addDays(week.monday, 7))}><${Icon} name="right" /></button>
-      ${!isThisWeek ? html`<button class="btn btn-sm" onClick=${() => go(today)}>Back to this week</button>` : null}
-    </div>
-    <div class="weektotal">
-      <div class="weektotal-line">
-        <span><strong>${fmt(weekTotal)}</strong> <span class="muted">of ${fmt(weekTarget)}</span></span>
-        ${week.pending
-          ? html`<span class="status status-warn">${plural(week.pending, 'change', 'changes')} not in YouTrack yet</span>`
-          : html`<span class="status status-ok">Everything is in YouTrack</span>`}
-      </div>
-      <div class="track" aria-hidden="true"><div class="fill" style=${{ width: pct + '%' }}></div></div>
-    </div>
-    <span class="grow1"></span>
-    ${timer
-      ? html`<div class="timer on">
-          <span class="pulse" aria-hidden="true"></span>
-          <div class="timer-text">
-            <span class="small"><a class="ikey" href=${ytLink(timer.issue)} target="_blank" rel="noopener noreferrer">${timer.issue}</a> <span class="muted">${issueInfo(timer.issue).summary}</span></span>
-            <span class="clock" role="timer" aria-label="Time on the running timer">${clock(now - timer.startedAt)}</span>
-          </div>
-          <button class="btn btn-sm" onClick=${() => stopTimer({})}><${Icon} name="stop" size=${12} />Stop</button>
-        </div>`
-      : html`<div class="timer"><span class="muted small">No timer running. ▶ on a row starts one.</span></div>`}
-    <button class="btn btn-icon" aria-label="Settings" title="Settings" onClick=${() => setSheet('settings')}><${Icon} name="gear" /></button>
-    <button class="btn btn-primary btn-tall" onClick=${() => setSheet('submit')} disabled=${!week.pending}>${week.pending ? `Submit · ${week.pending}` : 'Up to date'}</button>
-  </div>`;
-
-  const quick = html`<section class="card quick" aria-label="Log time">
-    <div class="quick-line">
-      <div class="qe-wrap">
-        <span class="qe-icon"><${Icon} name="plus" /></span>
-        <label for="qe" class="sr">Log time in one line</label>
-        <input id="qe" class="qe" value=${q}
-          onInput=${(e) => setQ(e.target.value)}
-          onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); addFromQuick(); } else if (e.key === 'Escape') setQ(''); }}
-          placeholder="Log time in one line: issue, time, day, #type, note   (press / to jump here)"
-          autocomplete="off" spellcheck="false" />
-      </div>
-      <button class="btn btn-primary" onClick=${addFromQuick} disabled=${!qValid}>Add draft</button>
-    </div>
-    ${parsed
-      ? html`<div class="chips">
-          ${chips.map((c) => html`<span class=${'pchip ' + c.cls}><strong>${c.label}</strong>${c.sub ? html`<span class="sub">${c.sub}</span>` : null}</span>`)}
-          ${qHint ? html`<span class="muted small">${qHint}</span>` : null}
-        </div>`
-      : html`<div class="chips">
-          <span class="muted small">Try:</span>
-          ${[
-            `${rowIds[0] || 'APP-1234'} 1h30 review copy`,
-            `${rowIds[1] || rowIds[0] || 'APP-1234'} 2h #dev yesterday`,
-            '9:00–10:30 design review',
-            `${rowIds[0] || 'APP-1234'} 15m mon-fri standup`,
-          ].map((t) => html`<button class="ex mono" onClick=${() => { setQ(t); const el = document.getElementById('qe'); if (el) el.focus(); }}>${t}</button>`)}
-        </div>`}
-  </section>`;
-
-  const dayHeads = dates.map((d, i) => {
-    const t = dayTotals[i];
-    const shown = t + (timer && d === timerDate ? timerMin : 0);
-    let st = 'future';
-    let note = t ? fmt(t) : '–';
-    let title = '';
-    if (!isWorkDay(d)) { st = 'off'; note = t ? fmt(t) : 'off'; title = 'Not a work day'; } else if (d === today) { st = 'today'; note = fmt(shown); title = `Today: ${fmt(shown)} so far of ${fmt(target)}`; } else if (d < today) {
-      if (t >= target) { st = 'ok'; note = `${fmt(t)} ✓`; title = `${fmt(t)}, target reached`; } else { st = 'under'; note = fmt(t); title = `${fmt(t)} of ${fmt(target)}: ${fmt(target - t)} short`; }
-    }
-    const barPct = isWorkDay(d) && target ? Math.min(100, Math.round((shown / target) * 100)) : 0;
-    return { d, st, note, title, barPct, total: t, isToday: d === today };
-  });
-
-  const rowView = (id) => {
-    const info = issueInfo(id);
-    const color = info.project ? projectColor(info.project.shortName) : 'var(--line2)';
-    const timerHere = !!timer && timer.issue === id;
-    let rowTotal = 0;
-    let rowHasItems = false;
-    const cellViews = dates.map((d) => {
-      const here = cellEntries(id, d);
-      if (here.length) rowHasItems = true;
-      const lv = liveOf(here);
-      const min = sum(lv);
-      rowTotal += min;
-      const pending = here.some((e) => e.status !== 'synced');
-      const failed = here.some((e) => e.error);
-      let kind = 'empty';
-      if (here.length && !lv.length) kind = 'deleted';
-      else if (min > 0 && pending) kind = 'draft';
-      else if (min > 0) kind = 'synced';
-      const running = timerHere && d === timerDate;
-      const isEditing = editing && editing.issue === id && editing.date === d;
-      const isSel = sel && sel.issue === id && sel.date === d;
-      const aria = `${id}, ${dayLabel(d)}: ${min > 0 ? fmt(min) : 'no time'}${kind === 'draft' ? ', not submitted' : kind === 'deleted' ? ', will be removed' : ''}`;
-      if (isEditing) {
-        return html`<div class="cellwrap" key=${d}>
-          <${CellInput}
-            value=${editing.text}
-            label=${aria}
-            onInput=${(e) => setEditing(Object.assign({}, editingRef.current, { text: e.target.value }))}
-            onKeyDown=${(e) => onCellKey(e, id, d)}
-            onBlur=${() => { const ed = editingRef.current; if (ed && ed.issue === id && ed.date === d) commitEdit(null); }}
-          />
-        </div>`;
-      }
-      const label = min > 0 ? fmt(min) : kind === 'deleted' ? fmt(sum(here)) : '';
-      return html`<button key=${d}
-        class=${`cell k-${kind}${isWorkDay(d) ? '' : ' weekend'}${isSel ? ' sel' : ''}${failed ? ' failed' : ''}${d === today ? ' today' : ''}`}
-        onClick=${() => startEdit(id, d)} aria-label=${aria}>
-        ${label ? html`<span class="val">${label}</span>` : null}
-        ${!label && !running ? html`<span class="plus" aria-hidden="true">+</span>` : null}
-        ${running ? html`<span class="run"><span class="pulse" aria-hidden="true"></span>${fmt(Math.max(1, timerMin))}</span>` : null}
-      </button>`;
-    });
-    const removable = week.rows.includes(id) && !rowHasItems && !timerHere;
-    return html`<div class="grow" key=${id} role="row">
-      <div class="icell">
-        <button class=${'play' + (timerHere ? ' on' : '')} onClick=${() => toggleTimer(id)}
-          aria-label=${timerHere ? `Stop the timer on ${id}` : `Start a timer on ${id}`} title=${timerHere ? 'Stop the timer' : 'Start a timer'}>
-          <${Icon} name=${timerHere ? 'stop' : 'play'} size=${11} />
-        </button>
-        <span class="pdot" style=${{ background: color }} aria-hidden="true"></span>
-        <div class="imeta">
-          <span class="ikeyline">
-            <a class="ikey" href=${ytLink(id)} target="_blank" rel="noopener noreferrer" title="Open in YouTrack">${id}</a>
-            ${info.project ? html`<span class="iproj">${info.project.name}</span>` : null}
-            ${info.missing ? html`<span class="iproj err">can't open</span>` : null}
-            ${info.resolved ? html`<span class="iproj">resolved</span>` : null}
-          </span>
-          <span class="isum" title=${info.summary}>${info.summary || '—'}</span>
-        </div>
-        ${removable ? html`<button class="xbtn" aria-label=${`Remove the ${id} row`} title="Remove row"
-          onClick=${() => run(() => api('POST', '/rows', { monday: week.monday, action: 'remove', issue: id }))}><${Icon} name="x" size=${12} /></button>` : null}
-      </div>
-      ${cellViews}
-      <div class="tc">${rowTotal ? fmt(rowTotal) : '–'}</div>
-    </div>`;
-  };
-
-  const grid = html`<section class="card gridcard" aria-label="Week grid">
-    <div class="gridbar">
-      <div class="legend">
-        <span><span class="lg lg-synced" aria-hidden="true"></span>In YouTrack</span>
-        <span><span class="lg lg-draft" aria-hidden="true"></span>Draft, not submitted</span>
-        <span><span class="lg lg-del" aria-hidden="true"></span>Will be removed</span>
-      </div>
-      <span class="grow1"></span>
-      <button class="btn btn-sm" onClick=${() => setAddRow(!addRow)} aria-expanded=${addRow}><${Icon} name="plus" size=${13} />Add row</button>
-      <button class="btn btn-sm" onClick=${() => run(
-        () => api('POST', '/rows', { monday: week.monday, action: 'copy-previous' }),
-        (r) => (r.added.length ? `Added ${r.added.join(', ')}` : 'Nothing new to copy') + (r.skipped.length ? ` · skipped ${r.skipped.join(', ')} (resolved)` : ''),
-      )}><${Icon} name="copy" size=${13} />Copy last week's rows</button>
-      <button class="btn btn-sm btn-ghost" title="Reload from YouTrack" aria-label="Reload from YouTrack" onClick=${async () => { await api('POST', '/refresh').catch(() => {}); await load(week.monday, true); loadSugg(week.monday); }}><${Icon} name="refresh" size=${14} /></button>
-    </div>
-    ${addRow ? html`<${AddRow}
-      onClose=${() => setAddRow(false)}
-      onPick=${(i) => { setAddRow(false); run(() => api('POST', '/rows', { monday: week.monday, action: 'add', issue: i.idReadable }), `Added ${i.idReadable} as a row`); }}
-    />` : null}
-    <div class="gridscroll">
-      <div class="gridinner" role="grid" aria-label="Time per issue and day">
-        <div class="grow ghead" role="row">
-          <div class="hc">Issue</div>
-          ${dayHeads.map((h) => html`<div key=${h.d} class=${`dh st-${h.st}${h.isToday ? ' today' : ''}`} role="columnheader" title=${h.title} aria-label=${`${dayLabel(h.d)}${h.isToday ? ', today' : ''}. ${h.title || h.note}`}>
-            <div class="dh-top"><span class="dh-day">${DOW[weekdayIndex(h.d)]}</span><span class="dh-num">${dayNum(h.d)}</span></div>
-            <div class="dn">${h.note}</div>
-            <div class="dt"><div class="df" style=${{ width: h.barPct + '%' }}></div></div>
-          </div>`)}
-          <div class="hc end">Total</div>
-        </div>
-        ${rowIds.length ? rowIds.map(rowView) : html`<div class="emptyweek">Nothing logged this week yet. Type a line above, add a row, or take a suggestion.</div>`}
-        <div class="grow gtot" role="row">
-          <div class="icell strong">Day total</div>
-          ${dayHeads.map((h) => html`<div key=${h.d} class=${'dtot' + (h.st === 'under' ? ' under' : h.st === 'ok' ? ' ok' : '')}>${h.total ? fmt(h.total) : '–'}</div>`)}
-          <div class="dtot strong">${fmt(weekTotal)}</div>
-        </div>
-      </div>
-    </div>
-    <div class="gridfoot muted small">Click a cell and type 1.5, 1h30, 90m or 1:30. Enter saves, Tab moves a day, ↑ ↓ move a row, Esc cancels, 0 removes the time.</div>
-  </section>`;
-
-  // Suggestions rail
-  const visibleSugg = sugg.items.filter((s) => dates.includes(s.date));
-  const shortDays = dayHeads.filter((h) => h.st === 'under');
-  const suggestionsView = html`<div class="rail-body" key="suggest">
-    <p class="muted small nomargin" key="intro">Drafted from your YouTrack activity: comments, field changes, attachments, commits. Nothing is logged until you add it.</p>
-    ${shortDays.length
-      ? html`<div class="gapcard" key="gap-warn">
-          <div class="gaphead warn"><${Icon} name="warn" /><span>${plural(shortDays.length, 'day is', 'days are')} under ${fmt(target)}</span></div>
-          ${shortDays.map((h) => {
-            const list = visibleSugg.filter((s) => s.date === h.d);
-            const tot = list.reduce((a, s) => a + s.minutes, 0);
-            const short = target - h.total;
-            return html`<div class="gaprow" key=${h.d}>
-              <div class="grow1"><div class="strong">${dayLabel(h.d)}</div><div class="muted small">${fmt(short)} short${list.length ? ` · ${plural(list.length, 'suggestion covers', 'suggestions cover')} ${fmt(tot)}` : ' · no suggestions'}</div></div>
-              ${list.length ? html`<button class="btn btn-sm" onClick=${() => acceptSuggestions(list)}><${Icon} name="sparkle" size=${13} />${
-                list.length === 1 ? `Add ${fmt(tot)}` : tot >= short && tot <= short + 30 ? `Fill to ${fmt(target)}` : `Add all ${list.length} · ${fmt(tot)}`
-              }</button>` : null}
-            </div>`;
-          })}
-        </div>`
-      : dates[0] < today
-        ? html`<div class="gapcard" key="gap-ok"><div class="gaphead ok"><${Icon} name="check" /><span>Every past work day reaches ${fmt(target)}</span></div></div>`
-        : null}
-    ${sugg.loading ? html`<div class="muted small" key="loading">Reading your activity…</div>` : null}
-    ${[...new Set(visibleSugg.map((s) => s.date))].map((d) => html`<div class="sgroup" key=${d}>
-      <div class="glabel">${dayLabel(d)}</div>
-      ${visibleSugg.filter((s) => s.date === d).map((s) => html`<article class="sugg" key=${s.id}>
-        <div class="sugg-top">
-          <span class="src" aria-hidden="true"><${Icon} name="activity" size=${15} /></span>
-          <div class="grow1">
-            <div class="strong">${s.title}</div>
-            <div class="muted small">YouTrack · ${s.when}</div>
-          </div>
-          <span class="dur">${fmt(s.minutes)} est.</span>
-        </div>
-        <div class="map">→ <a class="ikey" href=${ytLink(s.issue)} target="_blank" rel="noopener noreferrer">${s.issue}</a> ${s.summary}${defaultTypeFor(s.issue) ? ` · ${defaultTypeFor(s.issue)}` : ''}</div>
-        <div class="muted small">${s.why}</div>
-        <div class="row-end">
-          <button class="btn btn-sm btn-ghost" onClick=${() => dismissSuggestion(s)}>Dismiss</button>
-          <button class="btn btn-sm" onClick=${() => acceptSuggestions([s])}>Add ${fmt(s.minutes)}</button>
-        </div>
-      </article>`)}
-    </div>`)}
-    ${!sugg.loading && !visibleSugg.length ? html`<div class="empty-note" key="empty">No suggestions for this week.</div>` : null}
-    ${sugg.errors.length ? html`<div class="err-line" key="errors">Couldn't read all of your activity: ${sugg.errors[0]}</div>` : null}
-    <div class="row-end" key="again"><button class="btn btn-sm btn-ghost" onClick=${() => loadSugg(week.monday)}><${Icon} name="refresh" size=${13} />Look again</button></div>
-  </div>`;
-
-  // Details rail
-  let detailsView;
-  if (!sel) detailsView = html`<div class="empty-note">Pick a cell to see its work items, type and note.</div>`;
-  else {
-    const info = issueInfo(sel.issue);
-    const here = cellEntries(sel.issue, sel.date);
-    const types = typesFor(sel.issue) || [];
-    const p = projectOf(sel.issue);
-    const def = defaultTypeFor(sel.issue);
-    detailsView = html`<div class="rail-body" key="details">
-      <div>
-        <div class="small"><a class="ikey" href=${ytLink(sel.issue)} target="_blank" rel="noopener noreferrer">${sel.issue}</a> <span class="muted">· ${dayLabel(sel.date)}</span></div>
-        <div class="dtitle">${info.summary}</div>
-        ${info.project ? html`<div class="muted small">${info.project.name}</div>` : null}
-      </div>
-      ${!def && types.length && p ? html`<div class="hint">No default work type for ${p.shortName} yet. Set one in Settings and new time gets it automatically.</div>` : null}
-      ${here.length ? null : html`<div class="muted small">No work items on this day yet.</div>`}
-      ${here.map((e) => html`<${EntryCard} key=${e.key} entry=${e} types=${types}
-        onPatch=${(c) => run(() => patchRaw(e, c))}
-        onRemove=${() => run(() => removeRaw(e), e.status === 'draft' ? 'Draft removed' : 'It will be removed when you submit')}
-        onRestore=${() => run(() => restoreRaw(e), 'Kept')} />`)}
-      <div><button class="btn btn-sm" onClick=${() => run(() => api('POST', '/entries', { issue: sel.issue, dates: [sel.date], minutes: 30 }), 'Added 30m as a draft')}><${Icon} name="plus" size=${13} />Add another work item</button></div>
-      <div class="muted small">Changes stay drafts until you submit.</div>
-    </div>`;
+  // A forgotten timer can stop at the end of the day it started, or at midnight if it started later.
+  let trim = null;
+  if (timer) {
+    const dayEnd = localDateTimeMs(timerDate, settings.dayEnds);
+    const day = timerDate === today ? '' : ` ${DOW[weekdayIndex(timerDate)]}`;
+    if (dayEnd > timer.startedAt && dayEnd < now) trim = { at: dayEnd, label: `Stop at ${settings.dayEnds}${day}` };
+    else if (timerDate < today) trim = { at: localDateTimeMs(addDays(timerDate, 1), '00:00'), label: `Stop at midnight${day}` };
   }
 
-  const railView = html`<aside class="card rail" aria-label="Suggestions and details">
-    <div class="tabs" role="tablist">
-      <button class=${'tab' + (rail === 'suggest' ? ' on' : '')} role="tab" aria-selected=${rail === 'suggest'} onClick=${() => setRail('suggest')}>
-        Suggestions${visibleSugg.length ? html`<span class="count">${visibleSugg.length}</span>` : null}
-      </button>
-      <button class=${'tab' + (rail === 'details' ? ' on' : '')} role="tab" aria-selected=${rail === 'details'} onClick=${() => setRail('details')}>Details</button>
-    </div>
-    ${rail === 'suggest' ? suggestionsView : detailsView}
-  </aside>`;
-
-  const host = (() => { try { return new URL(week.url).host; } catch (_) { return week.url; } })();
+  const heads = cols.map((d) => {
+    const i = dates.indexOf(d);
+    const t = dayTotals[i];
+    const shown = t + runningOn(d);
+    let st = 'future';
+    let title = '';
+    if (!isWorkDay(d)) { st = 'off'; title = 'Day off'; } else if (d === today) { st = 'today'; title = `${fmt(shown)} so far of ${fmt(target)}`; } else if (d < today) {
+      if (t >= target) { st = 'ok'; title = `${fmt(t)} · target reached`; } else { st = 'under'; title = `${fmt(t)} of ${fmt(target)} · ${fmt(target - t)} short`; }
+    }
+    const pct = target ? Math.min(100, Math.round((shown / target) * 100)) : 0;
+    return { d, st, title, pct, total: t, shown };
+  });
 
   return html`<div class="app">
-    <header class="hostbar">
-      <${Brand} />
-      <span class="muted" aria-hidden="true">/</span>
-      <span>My week</span>
-      <span class="grow1"></span>
-      <span class="muted small">${status.user ? `${status.user.fullName || status.user.login} · ` : ''}${host}</span>
-      <button class="btn btn-sm btn-ghost" onClick=${onReconnect}>Change connection</button>
+    <header class="top">
+      <${Glass} class="seg weeknav" bezel=${14} scale=${26}>
+        <button class="seg-btn" aria-label="Previous week" onClick=${() => go(addDays(week.monday, -7))}><${Icon} name="left" size=${18} /></button>
+        <button class="seg-btn seg-label" onClick=${() => go(today)} disabled=${isThisWeek} title=${isThisWeek ? rangeLabel(dates) : 'Back to this week'}>${weekTitle}</button>
+        <button class="seg-btn" aria-label="Next week" onClick=${() => go(addDays(week.monday, 7))}><${Icon} name="right" size=${18} /></button>
+      <//>
+      <span class="grow"></span>
+      <${Glass} as="button" class="round" bezel=${12} scale=${22} aria-label="Settings" title="Settings" onClick=${() => setSheet('settings')}><${Icon} name="gear" size=${18} /><//>
     </header>
+
     <main class="page">
-      ${header}
-      ${week.ytError ? html`<div class="banner err" role="alert"><${Icon} name="warn" /><span>YouTrack didn't answer: ${week.ytError} Showing your drafts only.</span><button class="btn btn-sm" onClick=${() => load(week.monday, true)}>Try again</button></div>` : null}
-      ${longRun ? html`<div class="banner warn" role="alert">
-        <${Icon} name="warn" />
-        <span class="grow1">Your timer on <strong>${timer.issue}</strong> has run since ${timerDate === today ? hhmm(timer.startedAt) : `${dayLabel(timerDate)}, ${hhmm(timer.startedAt)}`} (${fmt(timerMin)}).</span>
-        ${showTrim ? html`<button class="btn btn-sm" onClick=${() => stopTimer({ endAt: trimAt })}>Stop it at ${settings.dayEnds}${timerDate === today ? '' : ' on ' + dayLabel(timerDate)} (${fmt((trimAt - timer.startedAt) / 60000)})</button>` : null}
-        <button class="btn btn-sm" onClick=${() => stopTimer({})}>Keep all ${fmt(timerMin)}</button>
-        <button class="btn btn-sm btn-ghost" onClick=${() => stopTimer({ discard: true })}>Discard</button>
-      </div>` : null}
-      ${quick}
-      <div class="mainrow">
-        ${grid}
-        ${railView}
-      </div>
+      <${Hero} total=${weekTotal} target=${weekTarget} range=${rangeLabel(dates)} pending=${week.pending} ytError=${week.ytError}
+        onRetry=${() => load(week.monday, true)} />
+
+      <section class="paper" aria-label="Week">
+        <${WeekGrid}
+          cols=${cols} heads=${heads} today=${today} rowIds=${rowIds} ghostIds=${ghostIds}
+          isWorkDay=${isWorkDay} cellEntries=${cellEntries} liveOf=${liveOf} sum=${sum} runningOn=${runningOn}
+          issueInfo=${issueInfo} ytLink=${ytLink} timer=${timer}
+          suggAt=${suggAt} suggestions=${suggestions} edit=${edit} rows=${week.rows}
+          onOpen=${openEditor}
+          onAccept=${acceptSuggestions} onDismiss=${dismissSuggestion}
+          onTimer=${(id) => (timer && timer.issue === id ? stopTimer({}) : startTimer(id))}
+          onRemoveRow=${(id) => run(() => api('POST', '/rows', { monday: week.monday, action: 'remove', issue: id }))}
+          adding=${adding} setAdding=${setAdding}
+          onAddRow=${(i) => { setAdding(false); run(() => api('POST', '/rows', { monday: week.monday, action: 'add', issue: i.idReadable }), `${i.idReadable} added`); }}
+          onCopyLast=${isThisWeek || week.monday > thisMonday ? () => run(
+            () => api('POST', '/rows', { monday: week.monday, action: 'copy-previous' }),
+            (r) => (r.added.length ? `Added ${r.added.join(', ')}` : 'Nothing new to copy') + (r.skipped.length ? ` · skipped ${r.skipped.join(', ')} (resolved)` : ''),
+          ) : null}
+        />
+        ${sugg.errors.length ? html`<p class="paper-note">Couldn't read all of your YouTrack activity: ${sugg.errors[0]}</p>` : null}
+      </section>
     </main>
+
+    <div class="edge" aria-hidden="true"></div>
+
+    <${Dock}
+      q=${q} setQ=${setQ} tokens=${tokens} action=${action} onSubmit=${submitDock}
+      timer=${timer} now=${now} longRun=${longRun} issueInfo=${issueInfo}
+      pending=${week.pending} onSubmitWeek=${() => { setEdit(null); setSheet('submit'); }}
+      timerPop=${timerPop} setTimerPop=${(v) => { if (v) setEdit(null); setTimerPop(v); }}
+      onStop=${stopTimer} trim=${trim} timerDate=${timerDate} today=${today}
+    />
+
+    ${edit ? html`<${Popover} key=${edit.issue + edit.date} anchorId=${cellId(edit.issue, edit.date)} onDismiss=${() => closeEditor(true)} onEscape=${() => closeEditor(false, true)}>
+      <${CellEditor}
+        api=${editorRef}
+        issue=${edit.issue} date=${edit.date} initial=${edit.initial}
+        info=${issueInfo(edit.issue)} ytLink=${ytLink(edit.issue)}
+        entries=${cellEntries(edit.issue, edit.date)} liveOf=${liveOf} sum=${sum}
+        types=${typesFor(edit.issue) || []} defType=${defaultTypeFor(edit.issue)}
+        suggestion=${suggAt(edit.issue, edit.date)}
+        timerHere=${!!timer && timer.issue === edit.issue}
+        onCommit=${(text, extra) => commitCell(edit.issue, edit.date, text, extra)}
+        onMove=${(key, shift, text, extra) => {
+          const cur = edit;
+          const next = nextCell(cur.issue, cur.date, key, shift);
+          if (next) openEditor(next.issue, next.date);
+          else { setEdit(null); focusCell(cur); }
+          return commitCell(cur.issue, cur.date, text, extra);
+        }}
+        onClose=${(commit) => closeEditor(commit, true)}
+        onPatch=${(e, c) => serial(() => run(() => patchRaw(e, c)))}
+        onRemove=${(e) => serial(() => run(() => removeRaw(e), e.status === 'draft' ? 'Removed' : 'Will be removed when you submit'))}
+        onRestore=${(e) => serial(() => run(() => restoreRaw(e), 'Kept'))}
+        onTimer=${() => { setEdit(null); startTimer(edit.issue); }}
+      />
+    <//>` : null}
+
     ${sheet === 'submit' ? html`<${SubmitSheet}
-      week=${week} dayHeads=${dayHeads} target=${target} timer=${timer} timerMin=${timerMin}
-      typesFor=${typesFor} issueInfo=${issueInfo}
+      week=${week} heads=${heads} target=${target} timer=${timer} timerMin=${timerMin}
+      typesFor=${typesFor} issueInfo=${issueInfo} suggestions=${suggestions}
       onStopTimer=${() => api('POST', '/timer/stop', {})}
-      onShowSuggestions=${() => { setSheet(null); setRail('suggest'); }}
+      onAcceptSuggestions=${() => { setSheet(null); acceptSuggestions(suggestions); }}
       onClose=${() => setSheet(null)}
       onFinished=${() => { reload(); loadSugg(week.monday); }}
-      onUnauthorized=${onReconnect}
+      onUnauthorized=${onUnauthorized}
     />` : null}
     ${sheet === 'settings' ? html`<${SettingsSheet}
       week=${week} status=${status}
       onClose=${() => setSheet(null)}
       onSaved=${() => { setSheet(null); reload(); flash('Settings saved'); }}
+      onReload=${async () => { setSheet(null); await api('POST', '/refresh').catch(() => {}); await load(week.monday, true); loadSugg(week.monday); flash('Reloaded from YouTrack'); }}
       onReconnect=${() => { setSheet(null); onReconnect(); }}
     />` : null}
-    ${toast ? html`<div class="toast-wrap"><div class=${'toast' + (toast.kind === 'error' ? ' err' : '')} role="status">${toast.msg}</div></div>` : null}
+    ${toast ? html`<div class="toast-wrap" key=${toast.id}>
+      <${Glass} class=${'toast' + (toast.kind === 'error' ? ' err' : '')} refract=${false} role="status">
+        <span>${toast.msg}</span>
+        ${toast.action ? html`<button class="toast-act" onClick=${toast.action.fn}>${toast.action.label}</button>` : null}
+      <//>
+    </div>` : null}
   </div>`;
 }
 
-function CellInput({ value, label, onInput, onKeyDown, onBlur }) {
-  const ref = useRef(null);
-  // Layout effect: focus before the next keystroke can land anywhere else.
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el) { el.focus(); el.select(); }
-  }, []);
-  return html`<input ref=${ref} class="cell-input" value=${value} aria-label=${label} onInput=${onInput} onKeyDown=${onKeyDown} onBlur=${onBlur} autocomplete="off" spellcheck="false" />`;
-}
+// ---------- hero ----------
 
-function EntryCard({ entry: e, types, onPatch, onRemove, onRestore }) {
-  const [note, setNote] = useState(e.text || '');
-  useEffect(() => { setNote(e.text || ''); }, [e.key, e.text]);
-  const editable = e.status !== 'deleted';
-  const badge = { synced: 'In YouTrack', draft: 'Draft', edited: 'Edited, not submitted', deleted: 'Will be removed' }[e.status];
-  const list = types && types.length ? types : e.type ? [e.type] : [];
-  return html`<div class=${'entry' + (e.error ? ' failed' : '')}>
-    <div class="entry-top">
-      <span class="edur">${fmt(e.minutes)}</span>
-      <span class=${'badge b-' + e.status}>${badge}</span>
-      ${e.fromTimer ? html`<span class="badge b-synced">timer</span>` : null}
-      <span class="grow1"></span>
-      ${editable ? html`
-        <button class="btn btn-sm btn-icon" aria-label="15 minutes less" disabled=${e.minutes <= 15} onClick=${() => onPatch({ minutes: e.minutes - 15 })}>−</button>
-        <button class="btn btn-sm btn-icon" aria-label="15 minutes more" onClick=${() => onPatch({ minutes: e.minutes + 15 })}>+</button>` : null}
+function Hero({ total, target, range, pending, ytError, onRetry }) {
+  const shown = useTween(total);
+  const pct = target ? Math.min(100, (total / target) * 100) : 0;
+  return html`<section class="hero" aria-label="Week total">
+    <div class="hero-range">${range}</div>
+    <div class="hero-total" aria-live="polite">
+      <span class="hero-num">${fmt(Math.round(shown))}</span>
+      ${target ? html`<span class="hero-of">of ${fmt(target)}</span>` : null}
     </div>
-    ${e.error ? html`<div class="err-line">Last submit failed: ${e.error}</div>` : null}
-    ${list.length
-      ? html`<div class="muted small">Work type</div>
-        <div class="pills">${list.map((t) => html`<button key=${t} class=${'pill' + (t === e.type ? ' on' : '')} aria-pressed=${t === e.type} disabled=${!editable}
-          onClick=${() => onPatch({ type: t === e.type ? null : t })}>${t}</button>`)}</div>`
-      : html`<div class="muted small">This project has no work types.</div>`}
-    ${editable
-      ? html`<label class="muted small" for=${'n-' + e.key}>Note</label>
-        <textarea id=${'n-' + e.key} class="note" rows="2" value=${note} placeholder="What did you do?"
-          onInput=${(ev) => setNote(ev.target.value)}
-          onBlur=${() => { if (note !== (e.text || '')) onPatch({ text: note }); }}></textarea>
-        <div class="row-end"><button class="btn btn-sm btn-ghost btn-danger" onClick=${onRemove}>Remove this work item</button></div>`
-      : html`<div class="small">${e.text || 'No note'}</div>
-        <div class="row-end"><button class="btn btn-sm" onClick=${onRestore}>Keep it</button></div>`}
+    <div class="hero-meter" aria-hidden="true"><i style=${{ width: pct + '%' }}></i></div>
+    ${ytError
+      ? html`<div class="hero-note warn"><${Icon} name="warn" size=${14} /> YouTrack didn't answer, so you see drafts only. <button class="link" onClick=${onRetry}>Try again</button></div>`
+      : !pending && total > 0 ? html`<div class="hero-note ok"><${Icon} name="check" size=${14} stroke=${2.4} /> All in YouTrack</div>` : null}
+  </section>`;
+}
+
+// ---------- the week ----------
+
+function WeekGrid(p) {
+  const { cols, heads, today, rowIds, ghostIds, isWorkDay, cellEntries, liveOf, sum, issueInfo, ytLink, timer, runningOn, suggAt, suggestions, edit } = p;
+  const template = {
+    '--cols': `minmax(var(--issue-w, 200px), 1fr) repeat(${cols.length}, minmax(var(--day-w, 78px), 108px)) var(--total-w, 80px)`,
+    '--min': `calc(var(--issue-w, 200px) + ${cols.length} * var(--day-w, 78px) + var(--total-w, 80px))`,
+  };
+  const empty = !rowIds.length && !ghostIds.length;
+
+  const cell = (id, d, ghostRow) => {
+    const here = cellEntries(id, d);
+    const lv = liveOf(here);
+    const min = sum(lv);
+    const pending = here.some((e) => e.status !== 'synced');
+    const failed = here.some((e) => e.error);
+    const removed = here.length && !lv.length;
+    const running = timer && timer.issue === id && runningOn(d) > 0;
+    const s = !min && !removed ? suggAt(id, d) : null;
+    const isEdit = edit && edit.issue === id && edit.date === d;
+    const cls = ['cell', d === today ? 'today' : '', isWorkDay(d) ? '' : 'off', isEdit ? 'editing' : ''].join(' ');
+    const keys = (e) => {
+      if (/^[0-9.:]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Already open: move focus into the editor so this keystroke lands there.
+        if (isEdit) { focusEditor(); return; }
+        e.preventDefault();
+        p.onOpen(id, d, e.key);
+        return;
+      }
+      const ks = { ArrowRight: [0, 1], ArrowLeft: [0, -1], ArrowDown: [1, 0], ArrowUp: [-1, 0] }[e.key];
+      if (!ks) return;
+      const all = [...rowIds, ...ghostIds];
+      const r = all.indexOf(id) + ks[0];
+      const c = cols.indexOf(d) + ks[1];
+      if (r < 0 || r >= all.length || c < 0 || c >= cols.length) return;
+      const n = document.getElementById(cellId(all[r], cols[c]));
+      if (n) { e.preventDefault(); n.focus(); }
+    };
+    if (s) {
+      return html`<div class=${cls + ' has-ghost'} key=${d} role="gridcell">
+        <button id=${cellId(id, d)} class="ghost" onClick=${() => p.onAccept([s])}
+          onKeyDown=${keys}
+          title=${`Suggested from ${s.title} (${s.when}). Click to add.`}
+          aria-label=${`${id}, ${dayLabel(d)}: suggested ${fmt(s.minutes)} from ${s.title}. Press to add.`}>
+          <${Icon} name="sparkle" size=${11} stroke=${2} />${fmt(s.minutes)}
+        </button>
+        <button class="ghost-x" aria-label=${`Dismiss the suggestion for ${id} on ${dayLabel(d)}`} title="Dismiss" onClick=${() => p.onDismiss(s)}><${Icon} name="x" size=${11} stroke=${2.4} /></button>
+      </div>`;
+    }
+    const label = min > 0 ? fmt(min) : removed ? fmt(sum(here)) : '';
+    const aria = `${id}, ${dayLabel(d)}: ${min > 0 ? fmt(min) : 'no time'}${pending && !removed ? ', not sent yet' : ''}${removed ? ', will be removed' : ''}${failed ? ', last send failed' : ''}`;
+    return html`<div class=${cls} key=${d} role="gridcell">
+      <button id=${cellId(id, d)} class=${'cbtn' + (pending && min > 0 ? ' pending' : '') + (removed ? ' removed' : '') + (failed ? ' failed' : '') + (ghostRow ? ' quiet' : '')}
+        onClick=${() => (isEdit ? focusEditor() : p.onOpen(id, d))} aria-label=${aria}
+        onKeyDown=${keys}>
+        ${running && !label ? html`<span class="run"><span class="pulse" aria-hidden="true"></span>${fmt(Math.max(1, Math.round(runningOn(d))))}</span>` : null}
+        ${running && label ? html`<span class="pulse" aria-hidden="true"></span>` : null}
+        ${label ? html`<span class="v">${label}</span>` : running ? null : html`<span class="plus" aria-hidden="true">+</span>`}
+        ${(pending && min > 0) || failed ? html`<i class=${'mark-dot' + (failed ? ' err' : '')} aria-hidden="true"></i>` : null}
+      </button>
+    </div>`;
+  };
+
+  const row = (id, ghost) => {
+    const info = issueInfo(id);
+    const timerHere = !!timer && timer.issue === id;
+    let total = 0;
+    let hasItems = false;
+    for (const d of cols) { const here = cellEntries(id, d); if (here.length) hasItems = true; total += sum(liveOf(here)); }
+    const removable = !ghost && p.rows.includes(id) && !hasItems && !timerHere;
+    return html`<div class=${'wrow' + (ghost ? ' ghost-row' : '') + (timerHere ? ' timing' : '')} key=${id} role="row">
+      <div class="issue" role="rowheader">
+        <button class=${'play' + (timerHere ? ' on' : '')} onClick=${() => p.onTimer(id)}
+          aria-label=${timerHere ? `Stop the timer on ${id}` : `Start a timer on ${id}`} title=${timerHere ? 'Stop the timer' : 'Start a timer'}>
+          <${Icon} name=${timerHere ? 'stop' : 'play'} size=${12} />
+        </button>
+        <div class="imeta">
+          <a class="ikey" href=${ytLink(id)} target="_blank" rel="noopener noreferrer" title="Open in YouTrack">${id}</a>
+          <span class="isum" title=${info.summary}>${info.summary || (info.missing ? "Can't open this issue" : '—')}</span>
+        </div>
+        ${removable ? html`<button class="row-x" aria-label=${`Remove ${id} from this week`} title="Remove row" onClick=${() => p.onRemoveRow(id)}><${Icon} name="x" size=${12} stroke=${2.2} /></button>` : null}
+      </div>
+      ${cols.map((d) => cell(id, d, ghost))}
+      <div class="rtotal">${total ? fmt(total) : ''}</div>
+    </div>`;
+  };
+
+  const ghostTotal = suggestions.reduce((a, s) => a + s.minutes, 0);
+
+  return html`<div class="wgrid-scroll">
+    <div class="wgrid" role="grid" aria-label="Time per issue and day" style=${template}>
+      <div class="wrow ghead" role="row">
+        <div class="hcell" role="columnheader"><span class="sr">Issue</span></div>
+        ${heads.map((h) => html`<div key=${h.d} class=${`dh st-${h.st}`} role="columnheader" title=${h.title}
+          aria-label=${`${dayLabel(h.d)}${h.st === 'today' ? ', today' : ''}. ${h.title || fmt(h.total)}`}>
+          <div class="dh-name"><span>${DOW[weekdayIndex(h.d)]}</span> ${dayNum(h.d)}</div>
+          <div class="dh-total">${h.st === 'off' && !h.total ? 'off' : h.shown ? fmt(Math.round(h.shown)) : '–'}${h.st === 'ok' ? html` <${Icon} name="check" size=${11} stroke=${2.6} />` : null}</div>
+          ${h.st !== 'off' ? html`<div class="meter" aria-hidden="true"><i style=${{ width: h.pct + '%' }}></i></div>` : html`<div class="meter none" aria-hidden="true"></div>`}
+        </div>`)}
+        <div class="hcell end" role="columnheader">Total</div>
+      </div>
+      ${rowIds.map((id) => row(id, false))}
+      ${ghostIds.length ? html`<div class="wrow section" role="row" key="sugg-head">
+        <div class="section-label" role="rowheader"><${Icon} name="sparkle" size=${13} /> From your YouTrack activity</div>
+        <div class="section-act">
+          <button class="link" onClick=${() => p.onAccept(suggestions)}>Add all · ${fmt(ghostTotal)}</button>
+        </div>
+      </div>` : null}
+      ${ghostIds.map((id) => row(id, true))}
+      <div class="wrow addline" role="row" key="add">
+        ${p.adding
+          ? html`<${AddIssue} onClose=${() => p.setAdding(false)} onPick=${p.onAddRow} exclude=${rowIds} />`
+          : html`<button class="add-btn" onClick=${() => p.setAdding(true)}><${Icon} name="plus" size=${14} /> Add issue</button>`}
+      </div>
+    </div>
+    ${empty ? html`<div class="empty">
+      <p>Nothing logged this week yet.</p>
+      <div class="empty-acts">
+        ${p.onCopyLast ? html`<button class="btn" onClick=${p.onCopyLast}><${Icon} name="copy" size=${14} /> Start from last week's issues</button>` : null}
+      </div>
+      <p class="hint">Or type below: <span class="mono">APP-1207 1h30 review</span></p>
+    </div>` : null}
   </div>`;
 }
 
-function AddRow({ onClose, onPick }) {
+function AddIssue({ onClose, onPick, exclude }) {
   const [q, setQ] = useState('');
   const [list, setList] = useState(null);
   const [err, setErr] = useState('');
+  const [hi, setHi] = useState(0);
   const ref = useRef(null);
   useLayoutEffect(() => { if (ref.current) ref.current.focus(); }, []);
   useEffect(() => {
     let alive = true;
     const t = setTimeout(() => {
       api('GET', '/issues/search?q=' + enc(q.trim()))
-        .then((r) => { if (alive) { setList(r.issues || []); setErr(''); } })
+        .then((r) => { if (alive) { setList((r.issues || []).filter((i) => !exclude.includes(i.idReadable))); setErr(''); setHi(0); } })
         .catch((e) => { if (alive) setErr(e.message); });
-    }, q ? 300 : 0);
+    }, q ? 280 : 0);
     return () => { alive = false; clearTimeout(t); };
   }, [q]);
-  return html`<div class="addrow">
-    <label for="rowq" class="muted small">Add any issue as a row, even before you log time on it. Search by ID or words; empty shows your open issues.</label>
-    <div class="addrow-line">
-      <input id="rowq" ref=${ref} class="field" value=${q} placeholder="APP-1234 or a few words" autocomplete="off"
-        onInput=${(e) => setQ(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Escape') onClose(); }} />
-      <button class="btn btn-ghost" onClick=${onClose}>Close</button>
+  const items = (list || []).slice(0, 8);
+  return html`<div class="addissue">
+    <div class="addissue-field">
+      <${Icon} name="search" size=${15} />
+      <input id="rowq" ref=${ref} value=${q} placeholder="Find an issue: ID or a few words" autocomplete="off" aria-label="Find an issue to add"
+        onInput=${(e) => setQ(e.target.value)}
+        onKeyDown=${(e) => {
+          if (e.key === 'Escape') onClose();
+          else if (e.key === 'ArrowDown') { e.preventDefault(); setHi(Math.min(hi + 1, items.length - 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(Math.max(hi - 1, 0)); } else if (e.key === 'Enter' && items[hi]) { e.preventDefault(); onPick(items[hi]); }
+        }} />
+      <button class="btn btn-quiet btn-sm" onClick=${onClose}>Cancel</button>
     </div>
-    ${err ? html`<div class="err-line">${err}</div>` : null}
-    <div class="results">
-      ${list === null ? html`<span class="muted small">Searching…</span>`
-        : list.length ? list.map((i) => html`<button key=${i.idReadable} class="result" onClick=${() => onPick(i)}><strong class="mono">${i.idReadable}</strong><span>${i.summary}</span></button>`)
-          : html`<span class="muted small">No issues match.</span>`}
+    <div class="results" role="listbox" aria-label="Issues">
+      ${err ? html`<div class="err-line">${err}</div>` : null}
+      ${list === null ? html`<div class="muted small pad">Searching…</div>`
+        : items.length ? items.map((i, n) => html`<button key=${i.idReadable} role="option" aria-selected=${n === hi} class=${'result' + (n === hi ? ' hi' : '')} onClick=${() => onPick(i)} onMouseEnter=${() => setHi(n)}>
+          <span class="mono">${i.idReadable}</span><span class="ell">${i.summary}</span></button>`)
+          : html`<div class="muted small pad">No issues match.</div>`}
+    </div>
+  </div>`;
+}
+
+// ---------- popover + cell editor ----------
+
+function Popover({ anchorId, onDismiss, onEscape, children, width = 340 }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  const posRef = useRef(null);
+  const place = () => {
+    const a = document.getElementById(anchorId);
+    const el = ref.current;
+    if (!a || !el) return;
+    const r = a.getBoundingClientRect();
+    const w = Math.min(width, window.innerWidth - 24);
+    const h = el.offsetHeight;
+    const dock = 104;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.round(Math.max(12, Math.min(left, window.innerWidth - w - 12)));
+    let top = r.bottom + 8;
+    let below = true;
+    if (top + h > window.innerHeight - dock && r.top - h - 8 > 12) { top = r.top - h - 8; below = false; }
+    const next = { left, top: Math.round(Math.max(12, top)), w, below, ox: Math.round(r.left + r.width / 2 - left) };
+    const prev = posRef.current;
+    if (prev && prev.left === next.left && prev.top === next.top && prev.w === next.w && prev.below === next.below) return;
+    posRef.current = next;
+    setPos(next);
+  };
+  // Re-place after every render: the cell can move when the week around it changes.
+  useLayoutEffect(place);
+  useLayoutEffect(() => {
+    const onMove = () => requestAnimationFrame(place);
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onMove) : null;
+    if (ro) { if (ref.current) ro.observe(ref.current); const pg = document.querySelector('.page'); if (pg) ro.observe(pg); }
+    const onDown = (e) => {
+      if (ref.current && ref.current.contains(e.target)) return;
+      const a = document.getElementById(anchorId);
+      if (a && a.contains(e.target)) return;
+      onDismiss();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    // Whatever the editor shows, keyboard focus starts inside it.
+    if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus({ preventScroll: true });
+    return () => {
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+      document.removeEventListener('pointerdown', onDown, true);
+      if (ro) ro.disconnect();
+    };
+  }, [anchorId]);
+  const style = pos
+    ? { left: pos.left + 'px', top: pos.top + 'px', width: pos.w + 'px', transformOrigin: `${pos.ox}px ${pos.below ? '0' : '100%'}` }
+    // Not visibility:hidden: the editor inside must be focusable before it's placed.
+    : { opacity: 0, pointerEvents: 'none', left: '0px', top: '0px', width: width + 'px' };
+  return html`<div class="popover glass glass-strong" ref=${ref} style=${style} role="dialog" aria-label="Edit time" tabindex="-1"
+    onKeyDown=${(e) => { if (e.key === 'Escape' && onEscape) { e.preventDefault(); onEscape(); } }}>${children}</div>`;
+}
+
+const STATUS_TEXT = { synced: 'In YouTrack', draft: 'Not sent yet', edited: 'Changed · not sent yet', deleted: 'Will be removed when you submit' };
+const BAD_TIME = 'Use 1.5, 1h30, 90m or 1:30.';
+
+function CellEditor(props) {
+  const { issue, date, initial, info, ytLink, entries, liveOf, sum, types, defType, timerHere } = props;
+  const lv = liveOf(entries);
+  const cur = sum(lv);
+  const single = entries.length <= 1;
+  const item = single ? entries[0] || null : null;
+  const hasInitial = initial !== null && initial !== undefined;
+  // Frozen when the editor opens: a suggestion that disappears later must not turn into a log.
+  const [suggestion] = useState(props.suggestion || null);
+  const [offered] = useState(() => !item && !!suggestion && !hasInitial);
+  const [start] = useState(() => (hasInitial ? initial : cur ? fmt(cur) : offered ? fmt(suggestion.minutes) : ''));
+  const [text, setText] = useState(start);
+  const [type, setType] = useState(item ? item.type || '' : '');
+  const [note, setNote] = useState(item ? item.text || '' : '');
+  const [err, setErr] = useState('');
+  const textRef = useRef(text);
+  const typeRef = useRef(type);
+  const noteRef = useRef(note);
+  textRef.current = text;
+  typeRef.current = type;
+  noteRef.current = note;
+  const done = useRef(false);
+  const cancelled = useRef(false);
+  const touched = useRef(false);
+  const typeTouched = useRef(false);
+  const explicit = useRef(false);
+  const savedNote = useRef(item ? item.text || '' : '');
+  const flushers = useRef(new Set());
+  const input = useRef(null);
+
+  // New time: '' keeps the project's default, '-' means no type.
+  const typeValue = () => {
+    if (!typeTouched.current) return undefined;
+    if (typeRef.current === '-') return null;
+    if (typeRef.current === '') return defType ? undefined : null;
+    return typeRef.current;
+  };
+  const extra = () => (item ? {} : { type: typeValue(), text: noteRef.current.trim() });
+  // A suggested value only counts once you touch it or press Enter.
+  const value = () => (offered && !touched.current && !explicit.current ? '' : textRef.current);
+  const validate = () => {
+    const m = parseDuration(value());
+    if (m === null || m > 1440) { setErr(BAD_TIME); if (input.current) input.current.focus(); return false; }
+    return true;
+  };
+  const flushNote = () => {
+    if (!item || item.status === 'deleted' || cancelled.current) return;
+    if (noteRef.current === savedNote.current) return;
+    savedNote.current = noteRef.current;
+    props.onPatch(item, { text: noteRef.current });
+  };
+  const commit = async () => {
+    if (done.current) return true;
+    done.current = true;
+    if (!single) { for (const f of flushers.current) f(); return true; }
+    flushNote();
+    if (item && item.status === 'deleted') return true;
+    return props.onCommit(value(), extra());
+  };
+  const cancel = () => { cancelled.current = true; done.current = true; };
+  props.api.current = { commit, cancel };
+
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (el) { el.focus(); if (hasInitial) { const n = el.value.length; el.setSelectionRange(n, n); } else el.select(); }
+  }, []);
+
+  const keys = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      explicit.current = true;
+      if (validate()) props.onClose(true);
+      return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); props.onClose(false); return; }
+    if (e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!validate()) return;
+      done.current = true;
+      flushNote();
+      props.onMove(e.key, e.shiftKey, value(), extra());
+    }
+  };
+  const bump = (d) => {
+    const m = parseDuration(text);
+    const nm = Math.max(0, (m || 0) + d);
+    touched.current = true;
+    setErr('');
+    setText(nm ? fmt(nm) : '0');
+    if (input.current) input.current.focus();
+  };
+
+  const head = html`<div class="ed-head">
+    <div class="ed-title">
+      <a class="ikey" href=${ytLink} target="_blank" rel="noopener noreferrer">${issue}</a>
+      <span class="ed-day">${dayLabel(date)}</span>
+    </div>
+    <button class="icon-btn" aria-label="Close" onClick=${() => props.onClose(true)}><${Icon} name="x" size=${14} stroke=${2.2} /></button>
+  </div>
+  ${info.summary ? html`<div class="ed-sum">${info.summary}</div>` : null}`;
+
+  if (!single) {
+    const register = (f) => { flushers.current.add(f); return () => flushers.current.delete(f); };
+    return html`<div class="editor">
+      ${head}
+      <div class="ed-list">
+        ${entries.map((e) => html`<${ItemRow} key=${e.key} e=${e} types=${types} cancelled=${cancelled} register=${register}
+          onPatch=${props.onPatch} onRemove=${props.onRemove} onRestore=${props.onRestore} />`)}
+      </div>
+      <div class="ed-foot">
+        <span class="muted small">${plural(lv.length, 'work item', 'work items')} · ${fmt(cur)}</span>
+        <span class="grow"></span>
+        <button class="btn btn-sm" onClick=${props.onTimer} disabled=${timerHere}><${Icon} name="play" size=${12} /> Timer</button>
+      </div>
+    </div>`;
+  }
+
+  const removed = item && item.status === 'deleted';
+  return html`<div class="editor">
+    ${head}
+    ${removed
+      ? html`<div class="ed-removed"><s>${fmt(item.minutes)}</s> ${STATUS_TEXT.deleted}. <button class="link" onClick=${() => { cancel(); props.onRestore(item); props.onClose(false); }}>Keep it</button></div>`
+      : html`
+        <div class="ed-time">
+          <input ref=${input} class=${'ed-input' + (err ? ' bad' : '')} value=${text} aria-label="Time" placeholder="0h" aria-invalid=${!!err}
+            onInput=${(e) => { touched.current = true; setErr(''); setText(e.target.value); }} onKeyDown=${keys} autocomplete="off" spellcheck=${false} />
+          <div class="stepper" role="group" aria-label="Adjust by 15 minutes">
+            <button class="icon-btn" aria-label="15 minutes less" onClick=${() => bump(-15)}>−</button>
+            <button class="icon-btn" aria-label="15 minutes more" onClick=${() => bump(15)}>+</button>
+          </div>
+        </div>
+        ${err ? html`<div class="err-line" role="alert">${err}</div>` : null}
+        ${offered ? html`<div class="ed-hint"><${Icon} name="sparkle" size=${12} /> Suggested from ${suggestion.title}, ${suggestion.when}. Enter adds it.</div>` : null}
+        ${types.length ? html`<label class="ed-row"><span>Type</span>
+          <select value=${type} onChange=${(e) => {
+            typeTouched.current = true;
+            setType(e.target.value);
+            if (item) props.onPatch(item, { type: e.target.value || null });
+          }}>
+            ${item
+              ? html`<option value="">No type</option>`
+              : defType ? html`<option value="">${defType} (default)</option><option value="-">No type</option>` : html`<option value="">No type</option>`}
+            ${types.map((t) => html`<option value=${t}>${t}</option>`)}
+          </select></label>` : null}
+        <label class="ed-row"><span>Note</span>
+          <input value=${note} placeholder="What did you do?" onInput=${(e) => setNote(e.target.value)}
+            onKeyDown=${(e) => {
+              if (e.key !== 'Enter') return;
+              e.preventDefault();
+              explicit.current = true;
+              if (validate()) props.onClose(true);
+            }}
+            onBlur=${() => { if (!done.current) flushNote(); }} />
+        </label>
+        ${item && item.error ? html`<div class="err-line">Couldn't send: ${item.error}</div>` : null}
+        <div class="ed-foot">
+          <span class=${'ed-status s-' + (item ? item.status : 'new')}>${item ? STATUS_TEXT[item.status] : 'Enter to log · Tab for the next day'}</span>
+          <span class="grow"></span>
+          ${item ? html`<button class="btn btn-sm btn-quiet danger" onClick=${() => { cancel(); props.onRemove(item); props.onClose(false); }}>Remove</button>` : null}
+          <button class="btn btn-sm" onClick=${props.onTimer} disabled=${timerHere} title="Start a timer on this issue"><${Icon} name="play" size=${12} /> Timer</button>
+        </div>`}
+  </div>`;
+}
+
+function ItemRow({ e, types, cancelled, register, onPatch, onRemove, onRestore }) {
+  const [t, setT] = useState(fmt(e.minutes));
+  const [note, setNote] = useState(e.text || '');
+  const tRef = useRef(t);
+  const noteRef = useRef(note);
+  tRef.current = t;
+  noteRef.current = note;
+  const saved = useRef({ minutes: e.minutes, text: e.text || '' });
+  useEffect(() => {
+    setT(fmt(e.minutes));
+    setNote(e.text || '');
+    saved.current = { minutes: e.minutes, text: e.text || '' };
+  }, [e.key, e.minutes, e.text]);
+  const saveTime = () => {
+    if (cancelled.current || e.status === 'deleted') return;
+    const m = parseDuration(tRef.current);
+    if (m === null || m > 1440) { setT(fmt(e.minutes)); return; }
+    if (m === saved.current.minutes) return;
+    saved.current.minutes = m;
+    if (m === 0) onRemove(e); else onPatch(e, { minutes: m });
+  };
+  const saveNote = () => {
+    if (cancelled.current || e.status === 'deleted') return;
+    if (noteRef.current === saved.current.text) return;
+    saved.current.text = noteRef.current;
+    onPatch(e, { text: noteRef.current });
+  };
+  useEffect(() => register(() => { saveTime(); saveNote(); }), []);
+  if (e.status === 'deleted') {
+    return html`<div class="item removed"><s>${fmt(e.minutes)}</s><span class="muted small ell">${e.text || e.type || ''}</span><button class="link" onClick=${() => onRestore(e)}>Keep</button></div>`;
+  }
+  return html`<div class=${'item' + (e.error ? ' failed' : '')}>
+    <input class="item-t" value=${t} aria-label="Time" onInput=${(ev) => setT(ev.target.value)} onBlur=${saveTime} onKeyDown=${(ev) => { if (ev.key === 'Enter') ev.target.blur(); }} />
+    ${types.length ? html`<select class="item-type" value=${e.type || ''} aria-label="Type" onChange=${(ev) => onPatch(e, { type: ev.target.value || null })}>
+      <option value="">No type</option>${types.map((x) => html`<option value=${x}>${x}</option>`)}</select>` : null}
+    <input class="item-note" value=${note} placeholder="Note" aria-label="Note" onInput=${(ev) => setNote(ev.target.value)} onBlur=${saveNote} />
+    <button class="icon-btn" aria-label="Remove this work item" onClick=${() => onRemove(e)}><${Icon} name="x" size=${12} stroke=${2.2} /></button>
+    ${e.status !== 'synced' ? html`<i class=${'mark-dot' + (e.error ? ' err' : '')} title=${e.error || STATUS_TEXT[e.status]}></i>` : null}
+  </div>`;
+}
+
+// ---------- the dock ----------
+
+function Dock(p) {
+  const { q, setQ, tokens, action, timer, now, longRun, issueInfo, pending } = p;
+  const dockRef = useRef(null);
+  const chipRef = useRef(null);
+  const label = action === 'start' ? 'Start' : 'Log';
+  return html`<footer class="dock-wrap">
+    ${q.trim() ? html`<div class="preview glass glass-strong" aria-live="polite">
+      ${tokens.map((t, i) => html`<span key=${i} class=${'tok ' + t.cls}>${t.mono ? html`<span class="mono">${t.label}</span>` : t.label}${t.sub ? html`<span class="tok-sub">${t.sub}</span>` : null}</span>`)}
+    </div>` : null}
+    ${p.timerPop && timer ? html`<${TimerPop} ...${p} />` : null}
+    <div class="dock-row">
+      <${Glass} innerRef=${dockRef} class=${'dock' + (timer ? ' has-timer' : '')} bezel=${18} scale=${36} blur=${5} sheen=${true}>
+        ${timer
+          ? html`<div class=${'chip' + (longRun ? ' long' : '')} ref=${chipRef}>
+              <button class="chip-main" onClick=${() => p.setTimerPop(!p.timerPop)} aria-expanded=${p.timerPop} aria-label=${`Timer on ${timer.issue}: ${clock(now - timer.startedAt)}. Options`}>
+                <span class="pulse" aria-hidden="true"></span>
+                <span class="chip-clock" role="timer">${clock(now - timer.startedAt)}</span>
+                <span class="chip-issue mono">${timer.issue}</span>
+              </button>
+              <button class="chip-stop" aria-label="Stop the timer" title="Stop" onClick=${() => p.onStop({})}><${Icon} name="stop" size=${12} /></button>
+            </div>`
+          : html`<span class="dock-glyph" aria-hidden="true"><${Icon} name="clock" size=${19} stroke=${1.8} /></span>`}
+        <label for="qe" class="sr">Log time: issue, time, day, #type, note</label>
+        <input id="qe" class="dock-input" value=${q} autocomplete="off" spellcheck=${false}
+          placeholder=${timer ? 'Log something else…' : 'What did you work on?'}
+          onInput=${(e) => setQ(e.target.value)}
+          onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); p.onSubmit(); } else if (e.key === 'Escape') setQ(''); }} />
+        ${q.trim()
+          ? html`<button class=${'dock-act' + (action ? ' ready' : '')} onClick=${p.onSubmit} disabled=${!action}>
+              <span class="act-label">${label}</span> <${Icon} name=${action === 'start' ? 'play' : 'enter'} size=${13} />
+            </button>`
+          : html`<kbd class="dock-kbd" aria-hidden="true">/</kbd>`}
+      <//>
+      ${pending ? html`<${Glass} as="button" class="submit" bezel=${16} scale=${30} sheen=${true} onClick=${p.onSubmitWeek} aria-label=${`Submit ${plural(pending, 'change', 'changes')} to YouTrack`}>
+        <span class="submit-label">Submit</span> <span class="count">${pending}</span>
+      <//>` : null}
+    </div>
+  </footer>`;
+}
+
+function TimerPop(p) {
+  const { timer, now, issueInfo, trim, timerDate, today, longRun } = p;
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest('.chip')) p.setTimerPop(false); };
+    const onKey = (e) => { if (e.key === 'Escape') p.setTimerPop(false); };
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey); };
+  }, []);
+  const ran = (now - timer.startedAt) / 60000;
+  const since = timerDate === today ? hhmm(timer.startedAt) : `${dayLabel(timerDate)}, ${hhmm(timer.startedAt)}`;
+  return html`<div class="timerpop glass glass-strong" ref=${ref} role="dialog" aria-label="Timer">
+    <div class="tp-head"><span class="mono ikey">${timer.issue}</span><span class="ell">${issueInfo(timer.issue).summary}</span></div>
+    <div class=${'tp-since' + (longRun ? ' warn' : '')}>${longRun ? html`<${Icon} name="warn" size=${13} /> ` : null}Running since ${since}${timer.text ? html` · “${timer.text}”` : null}</div>
+    <div class="tp-acts">
+      ${trim ? html`<button class="btn btn-accent" onClick=${() => p.onStop({ endAt: trim.at })}>${trim.label} · ${fmt(Math.max(1, (trim.at - timer.startedAt) / 60000))}</button>` : null}
+      <button class=${'btn' + (trim ? '' : ' btn-accent')} onClick=${() => p.onStop({})}>Stop · ${fmt(Math.max(1, ran))}</button>
+      <button class="btn btn-quiet danger" onClick=${() => p.onStop({ discard: true })}>Discard</button>
     </div>
   </div>`;
 }
@@ -887,15 +1253,26 @@ function Sheet({ title, sub, onClose, canClose = true, children, footer, wide })
   useLayoutEffect(() => {
     const prev = document.activeElement;
     if (ref.current) ref.current.focus();
-    const onKey = (e) => { if (e.key === 'Escape' && canClose) onClose(); };
+    const onKey = (e) => {
+      if (e.key === 'Escape' && canClose) { onClose(); return; }
+      if (e.key !== 'Tab' || !ref.current) return;
+      // Keep keyboard focus inside the sheet while it's open.
+      const items = [...ref.current.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+        .filter((n) => !n.disabled && n.offsetParent !== null);
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const a = document.activeElement;
+      if (e.shiftKey && (a === first || a === ref.current)) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); } else if (!ref.current.contains(a)) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); if (prev && prev.focus) prev.focus(); };
   }, [canClose]);
   return html`<div class="scrim" onClick=${(e) => { if (e.target === e.currentTarget && canClose) onClose(); }}>
-    <div class=${'card sheet' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1" ref=${ref}>
+    <div class=${'sheet glass glass-strong' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1" ref=${ref}>
       <div class="sheet-head">
-        <div class="grow1"><h2 id="sheet-title">${title}</h2>${sub ? html`<div class="muted">${sub}</div>` : null}</div>
-        ${canClose ? html`<button class="btn btn-ghost btn-icon" aria-label="Close" onClick=${onClose}><${Icon} name="x" /></button>` : null}
+        <div class="grow"><h2 id="sheet-title">${title}</h2>${sub ? html`<div class="sheet-sub">${sub}</div>` : null}</div>
+        ${canClose ? html`<button class="icon-btn" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} stroke=${2.2} /></button>` : null}
       </div>
       <div class="sheet-body">${children}</div>
       ${footer ? html`<div class="sheet-foot">${footer}</div>` : null}
@@ -903,7 +1280,7 @@ function Sheet({ title, sub, onClose, canClose = true, children, footer, wide })
   </div>`;
 }
 
-function SubmitSheet({ week, dayHeads, target, timer, timerMin, typesFor, issueInfo, onStopTimer, onShowSuggestions, onClose, onFinished, onUnauthorized }) {
+function SubmitSheet({ week, heads, target, timer, timerMin, typesFor, issueInfo, suggestions, onStopTimer, onAcceptSuggestions, onClose, onFinished, onUnauthorized }) {
   const [st, setSt] = useState({ phase: 'loading', items: [], summaries: {}, results: {}, idx: -1, error: null });
   const loadPending = () => api('GET', '/pending')
     .then((r) => setSt((s) => ({ ...s, phase: 'review', items: r.items || [], summaries: r.summaries || {} })))
@@ -932,84 +1309,77 @@ function SubmitSheet({ week, dayHeads, target, timer, timerMin, typesFor, issueI
 
   const checks = [];
   if (phase === 'review') {
-    const short = dayHeads.filter((h) => h.st === 'under');
+    const short = heads.filter((h) => h.st === 'under');
     if (short.length) {
-      checks.push({ kind: 'warn', text: `${plural(short.length, 'day is', 'days are')} under ${fmt(target)} this week`, sub: short.map((h) => `${dayLabel(h.d)}: ${fmt(h.total)}`).join(' · ') + '. You can still submit.', action: 'Fill from suggestions', act: onShowSuggestions });
-    } else if (dayHeads.some((h) => h.st === 'ok')) {
-      checks.push({ kind: 'ok', text: `Every past work day this week reaches ${fmt(target)}` });
+      checks.push({
+        kind: 'warn',
+        text: `Under ${fmt(target)} on ${short.map((h) => `${DOW[weekdayIndex(h.d)]} (${fmt(h.total)})`).join(', ')}`,
+        action: suggestions.length ? `Add ${plural(suggestions.length, 'suggestion', 'suggestions')}` : null,
+        act: onAcceptSuggestions,
+      });
     }
-    if (timer) {
-      checks.push({ kind: 'info', text: `A timer is still running on ${timer.issue} (${fmt(Math.max(1, timerMin))})`, sub: 'Stop it to include that time in this submit.', action: 'Stop and include', act: async () => { await onStopTimer(); onFinished(); loadPending(); } });
-    }
+    if (timer) checks.push({ kind: 'info', text: `Timer running on ${timer.issue} · ${fmt(Math.max(1, timerMin))}`, action: 'Stop and include', act: async () => { await onStopTimer(); onFinished(); loadPending(); } });
     const noType = items.filter((it) => it.change !== 'remove' && !it.type && (typesFor(it.issue) || []).length);
-    if (noType.length) checks.push({ kind: 'info', text: `${plural(noType.length, 'work item has', 'work items have')} no work type`, sub: 'YouTrack accepts that. Set a default per project in Settings.' });
+    if (noType.length) checks.push({ kind: 'info', text: `${plural(noType.length, 'item has', 'items have')} no work type` });
     const failedBefore = items.filter((it) => it.error);
-    if (failedBefore.length) checks.push({ kind: 'err', text: `${plural(failedBefore.length, 'change', 'changes')} failed last time`, sub: `${failedBefore[0].error}${failedBefore.length > 1 ? ` (and ${failedBefore.length - 1} more)` : ''} They'll be tried again.` });
+    if (failedBefore.length) checks.push({ kind: 'err', text: `${plural(failedBefore.length, 'change', 'changes')} failed last time and will be retried` });
   }
 
   const okCount = Object.values(results).filter((r) => r && r.ok).length;
   const failCount = Object.values(results).filter((r) => r && !r.ok).length;
   const retried = Object.values(results).filter((r) => r && r.retried).length;
   const n = items.length;
+  const minutes = items.filter((i) => i.change !== 'remove').reduce((a, i) => a + i.minutes, 0);
 
-  let title = 'Submit to YouTrack';
-  let sub = '';
-  if (phase === 'review') sub = n ? `${plural(n, 'change goes', 'changes go')} to YouTrack as work items` : 'Nothing to submit';
-  if (phase === 'writing') { title = 'Writing to YouTrack…'; sub = `Writing ${Math.min(idx + 1, n)} of ${n}`; }
-  if (phase === 'done') { title = failCount ? 'Submitted, with problems' : 'Submitted'; sub = `${plural(okCount, 'change', 'changes')} written${failCount ? `, ${failCount} failed` : ''}`; }
+  let title = 'Send to YouTrack';
+  let sub = phase === 'review' ? (n ? `${plural(n, 'change', 'changes')} · ${fmt(minutes)}` : 'Nothing to send') : '';
+  if (phase === 'writing') { title = 'Sending…'; sub = `${Math.min(idx + 1, n)} of ${n}`; }
+  if (phase === 'done') { title = failCount ? 'Sent, with problems' : 'Sent'; sub = failCount ? `${okCount} of ${n} in YouTrack` : `All ${plural(n, 'change', 'changes')} are in YouTrack`; }
 
   const footer = html`
-    <span class="muted small grow1">${phase === 'done' ? (failCount ? 'Failed changes stay as drafts with the reason. Fix them and submit again.' : 'Your week is in YouTrack.') : 'Spent writes straight to YouTrack. It keeps only drafts and your settings.'}</span>
-    ${phase === 'review' ? html`<button class="btn" onClick=${onClose}>Keep editing</button><button class="btn btn-primary" onClick=${write} disabled=${!n}>Write ${plural(n, 'change', 'changes')}</button>` : null}
-    ${phase === 'writing' ? html`<button class="btn btn-primary" disabled>Writing…</button>` : null}
-    ${phase === 'done' || phase === 'error' ? html`<a class="btn" href=${week.url + '/timesheets'} target="_blank" rel="noopener noreferrer">Open YouTrack timesheets <${Icon} name="external" size=${12} /></a><button class="btn btn-primary" onClick=${onClose}>Done</button>` : null}`;
+    ${phase === 'review' ? html`<button class="btn btn-quiet" onClick=${onClose}>Not now</button><button class="btn btn-accent" onClick=${write} disabled=${!n}>Send ${plural(n, 'change', 'changes')}</button>` : null}
+    ${phase === 'writing' ? html`<button class="btn btn-accent" disabled>Sending…</button>` : null}
+    ${phase === 'done' || phase === 'error' ? html`<a class="btn btn-quiet" href=${week.url + '/timesheets'} target="_blank" rel="noopener noreferrer">YouTrack timesheets <${Icon} name="external" size=${12} /></a><button class="btn btn-accent" onClick=${onClose}>Done</button>` : null}`;
 
   return html`<${Sheet} title=${title} sub=${sub} onClose=${onClose} canClose=${phase !== 'writing'} footer=${footer} wide>
-    ${phase === 'loading' ? html`<p class="muted">Gathering your changes…</p>` : null}
+    ${phase === 'loading' ? html`<div class="pad center"><span class="spinner"></span></div>` : null}
     ${phase === 'error' ? html`<p class="err-line">${st.error}</p>` : null}
     ${phase === 'done' ? html`<div class=${'donebox' + (failCount ? ' warn' : '')}>
-      <${Icon} name=${failCount ? 'warn' : 'check'} size=${20} />
-      <div><div class="strong">${failCount ? `${okCount} of ${n} changes are in YouTrack` : `All ${plural(n, 'change is', 'changes are')} in YouTrack`}</div>
-      <div class="small">${retried ? `${plural(retried, 'write', 'writes')} hit a network error and ${retried === 1 ? 'was' : 'were'} retried without duplicating anything.` : ''}</div></div>
+      <span class="done-ic"><${Icon} name=${failCount ? 'warn' : 'check'} size=${18} stroke=${2.4} /></span>
+      <div>${failCount ? 'Failed changes stay here with the reason. Fix them and send again.' : 'Your week is in YouTrack.'}${retried ? ` ${plural(retried, 'write was', 'writes were')} retried after a network error, without duplicates.` : ''}</div>
     </div>` : null}
-    ${phase === 'writing' ? html`<div class="track"><div class="fill" style=${{ width: Math.round((Math.min(idx, n) / Math.max(1, n)) * 100) + '%' }}></div></div>` : null}
-    ${checks.length ? html`<div class="checks">${checks.map((c, i) => html`<div class="chk" key=${i}>
-      <span class=${'ci ci-' + c.kind}><${Icon} name=${{ ok: 'check', warn: 'bang', err: 'x', info: 'info' }[c.kind]} size=${13} stroke=${3} /></span>
-      <div class="grow1"><div class="strong">${c.text}</div>${c.sub ? html`<div class="muted small">${c.sub}</div>` : null}</div>
+    ${phase === 'writing' ? html`<div class="progress"><i style=${{ width: Math.round((Math.min(idx, n) / Math.max(1, n)) * 100) + '%' }}></i></div>` : null}
+    ${checks.length ? html`<div class="checks">${checks.map((c, i) => html`<div class=${'check c-' + c.kind} key=${i}>
+      <span class="check-dot" aria-hidden="true"></span>
+      <span class="grow">${c.text}</span>
       ${c.action ? html`<button class="btn btn-sm" onClick=${c.act}>${c.action}</button>` : null}
     </div>`)}</div>` : null}
-    ${n ? html`<div class="chtable">
-      <div class="chrow chhead"><span></span><span>Work item</span><span>Day</span><span>Time</span><span>Type</span><span>Change</span></div>
+    ${n ? html`<div class="changes">
       ${items.map((it, i) => {
         const r = results[it.key];
         let state = 'queued';
         if (r) state = r.ok ? 'done' : 'failed';
         else if (phase === 'writing' && i === idx) state = 'writing';
         const summary = st.summaries[it.issue] || issueInfo(it.issue).summary || '';
-        return html`<div class="chrow" key=${it.key}>
-          <span class="chstate">
-            ${state === 'queued' ? html`<span class="dotq" aria-label="Waiting"></span>` : null}
-            ${state === 'writing' ? html`<span class="spin" aria-label="Writing"></span>` : null}
-            ${state === 'done' ? html`<span class="okc" aria-label="Written"><${Icon} name="check" size=${15} stroke=${3} /></span>` : null}
-            ${state === 'failed' ? html`<span class="errc" aria-label="Failed"><${Icon} name="x" size=${15} stroke=${3} /></span>` : null}
+        return html`<div class=${'change s-' + state} key=${it.key}>
+          <span class="change-state" aria-label=${{ queued: 'Waiting', writing: 'Sending', done: 'Sent', failed: 'Failed' }[state]}>
+            ${state === 'writing' ? html`<span class="spinner sm"></span>` : state === 'done' ? html`<${Icon} name="check" size=${14} stroke=${2.6} />` : state === 'failed' ? html`<${Icon} name="x" size=${14} stroke=${2.6} />` : html`<i></i>`}
           </span>
-          <span class="chmain">
-            <span class="ell"><strong class="mono">${it.issue}</strong> <span class="muted">${it.text || summary}</span></span>
+          <span class="change-main">
+            <span class="ell"><span class="mono">${it.issue}</span> <span class="muted">${it.text || summary}</span></span>
             ${state === 'failed' ? html`<span class="err-text">${r.error}</span>` : !r && it.error ? html`<span class="err-text">Last time: ${it.error}</span>` : null}
-            ${r && r.retried ? html`<span class="muted small">Retried after a network error</span>` : null}
             ${r && r.dropped ? html`<span class="muted small">Already deleted in YouTrack, so the edit was dropped</span>` : null}
           </span>
-          <span>${dayLabel(it.date)}</span>
-          <span class="strong num">${fmt(it.minutes)}</span>
-          <span>${it.type || html`<span class="muted">—</span>`}</span>
-          <span class=${'chg chg-' + it.change}>${{ new: 'New', edit: 'Edited', remove: 'Remove' }[it.change]}</span>
+          <span class="change-day">${shortDay(it.date)}</span>
+          <span class="change-min">${it.change === 'remove' ? html`<s>${fmt(it.minutes)}</s>` : fmt(it.minutes)}</span>
+          <span class=${'tag t-' + it.change}>${{ new: 'New', edit: 'Edit', remove: 'Remove' }[it.change]}</span>
         </div>`;
       })}
-    </div>` : phase === 'review' ? html`<p class="muted">There's nothing to submit. Drafts and edits appear here.</p>` : null}
+    </div>` : phase === 'review' ? html`<p class="muted">Drafts and edits show up here.</p>` : null}
   <//>`;
 }
 
-function SettingsSheet({ week, status, onClose, onSaved, onReconnect }) {
+function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect }) {
   const s = week.settings;
   const [target, setTarget] = useState(fmt(s.dailyTargetMinutes));
   const [workDays, setWorkDays] = useState(s.workDays);
@@ -1020,7 +1390,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReconnect }) {
   const [busy, setBusy] = useState(false);
   const projectList = Object.values(week.projects).filter((p) => (p.types || []).length);
   for (const k of Object.keys(s.typeDefaults)) if (!week.projects[k]) projectList.push({ shortName: k, name: k, types: [s.typeDefaults[k]], unknown: true });
-  const DAYS = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
+  const DAYS = [[1, 'M', 'Monday'], [2, 'T', 'Tuesday'], [3, 'W', 'Wednesday'], [4, 'T', 'Thursday'], [5, 'F', 'Friday'], [6, 'S', 'Saturday'], [0, 'S', 'Sunday']];
   const save = async () => {
     const mins = parseDuration(target);
     if (mins === null || mins > 1440) { setErr('The daily target should look like 8h or 7.5.'); return; }
@@ -1035,38 +1405,39 @@ function SettingsSheet({ week, status, onClose, onSaved, onReconnect }) {
       setBusy(false);
     }
   };
-  const footer = html`<span class="grow1"></span><button class="btn" onClick=${onClose}>Cancel</button><button class="btn btn-primary" onClick=${save} disabled=${busy}>${busy ? 'Saving…' : 'Save'}</button>`;
-  return html`<${Sheet} title="Settings" sub="Stored on this computer, in Spent's data folder." onClose=${onClose} footer=${footer}>
-    <div class="form">
-      <section>
-        <h3>YouTrack</h3>
-        <p class="small">Connected as <strong>${status.user ? status.user.fullName || status.user.login : 'you'}</strong> at <span class="mono">${week.url}</span>.</p>
-        <button class="btn btn-sm" onClick=${onReconnect}>Change address or token</button>
-      </section>
-      <section>
-        <h3>Your work week</h3>
-        <div class="frow"><label for="s-target">Daily target</label><input id="s-target" class="field narrow" value=${target} onInput=${(e) => setTarget(e.target.value)} /></div>
-        <div class="frow"><span>Work days</span><div class="days">${DAYS.map(([n, label]) => html`<label class="daybox" key=${n}><input type="checkbox" checked=${workDays.includes(n)} onChange=${(e) => setWorkDays(e.target.checked ? [...workDays, n] : workDays.filter((x) => x !== n))} />${label}</label>`)}</div></div>
-        <div class="frow"><label for="s-round">Round timers to</label>
-          <select id="s-round" class="field narrow" value=${rounding} onChange=${(e) => setRounding(e.target.value)}>
-            ${['1', '5', '10', '15', '30'].map((v) => html`<option value=${v}>${v === '1' ? 'the minute' : v + ' minutes'}</option>`)}
-          </select></div>
-        <div class="frow"><label for="s-end">My day ends at</label><input id="s-end" type="time" class="field narrow" value=${dayEnds} onInput=${(e) => setDayEnds(e.target.value)} /></div>
-        <p class="muted small">The day end is used to trim a timer you forgot to stop.</p>
-      </section>
-      <section>
-        <h3>Default work type per project</h3>
-        <p class="muted small">New time gets this type unless you pick another one (or type <span class="mono">#review</span> in quick entry). Projects show up here once they're in a week you've opened.</p>
-        ${projectList.length ? projectList.map((p) => html`<div class="frow" key=${p.shortName}>
-          <label for=${'t-' + p.shortName}><span class="mono">${p.shortName}</span> <span class="muted small">${p.name !== p.shortName ? p.name : ''}</span></label>
-          <select id=${'t-' + p.shortName} class="field" value=${defs[p.shortName] || ''} onChange=${(e) => setDefs(Object.assign({}, defs, { [p.shortName]: e.target.value }))}>
-            <option value="">No default</option>
-            ${(p.types || []).map((t) => html`<option value=${t}>${t}</option>`)}
-          </select>
-        </div>`) : html`<p class="muted small">No projects with work types in this week yet.</p>`}
-      </section>
-      ${err ? html`<p class="form-error" role="alert">${err}</p>` : null}
+  let host = week.url;
+  try { host = new URL(week.url).host; } catch (_) { /* keep */ }
+  const footer = html`<button class="btn btn-quiet" onClick=${onClose}>Cancel</button><button class="btn btn-accent" onClick=${save} disabled=${busy}>${busy ? 'Saving…' : 'Save'}</button>`;
+  return html`<${Sheet} title="Settings" onClose=${onClose} footer=${footer}>
+    <div class="group">
+      <div class="group-title">Week</div>
+      <label class="srow"><span>Daily target</span><input id="s-target" class="in-sm" value=${target} onInput=${(e) => setTarget(e.target.value)} /></label>
+      <div class="srow"><span>Work days</span>
+        <div class="daypick" role="group" aria-label="Work days">${DAYS.map(([n, l, full]) => html`<button key=${n} type="button" class=${'daybtn' + (workDays.includes(n) ? ' on' : '')} aria-pressed=${workDays.includes(n)} aria-label=${full}
+          onClick=${() => setWorkDays(workDays.includes(n) ? workDays.filter((x) => x !== n) : [...workDays, n])}>${l}</button>`)}</div>
+      </div>
+      <label class="srow"><span>My day ends at</span><input id="s-end" type="time" class="in-sm" value=${dayEnds} onInput=${(e) => setDayEnds(e.target.value)} /></label>
+      <label class="srow"><span>Round timers to</span>
+        <select id="s-round" class="in-sm" value=${rounding} onChange=${(e) => setRounding(e.target.value)}>
+          ${['1', '5', '10', '15', '30'].map((v) => html`<option value=${v}>${v === '1' ? 'the minute' : v + ' min'}</option>`)}
+        </select></label>
     </div>
+    <div class="group">
+      <div class="group-title">Default work type</div>
+      ${projectList.length ? projectList.map((p) => html`<label class="srow" key=${p.shortName}>
+        <span><span class="mono">${p.shortName}</span>${p.name && p.name !== p.shortName ? html` <span class="muted small">${p.name}</span>` : null}</span>
+        <select id=${'t-' + p.shortName} class="in-md" value=${defs[p.shortName] || ''} onChange=${(e) => setDefs(Object.assign({}, defs, { [p.shortName]: e.target.value }))}>
+          <option value="">None</option>
+          ${(p.types || []).map((t) => html`<option value=${t}>${t}</option>`)}
+        </select>
+      </label>`) : html`<div class="srow muted small">Projects appear here once you've logged on them.</div>`}
+    </div>
+    <div class="group">
+      <div class="group-title">YouTrack</div>
+      <div class="srow"><span>${status.user ? status.user.fullName || status.user.login : 'Connected'}<span class="muted small block">${host}</span></span>
+        <span class="srow-acts"><button class="btn btn-sm" onClick=${onReload}>Reload</button><button class="btn btn-sm" onClick=${onReconnect}>Change</button></span></div>
+    </div>
+    ${err ? html`<p class="form-error" role="alert">${err}</p>` : null}
   <//>`;
 }
 
