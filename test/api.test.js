@@ -194,8 +194,11 @@ test('setup, week, edit, remove, submit, timer, suggestions', async () => {
     r = await t.call('POST', '/api/timer/start', { issue: 'APP-1221' });
     assert.equal(r.body.stopped.length, 1);
     assert.equal(r.body.stopped[0].minutes, 5); // a short run counts as one rounding step
-    r = await t.call('POST', '/api/timer/stop', { endAt: Date.now() + 47 * 60000 });
-    assert.equal(r.body.stopped[0].minutes, 45);
+    const startedAt = r.body.timer.startedAt;
+    const endAt = startedAt + 47 * 60000;
+    r = await t.call('POST', '/api/timer/stop', { endAt });
+    // 47 minutes round to 45. Close to midnight the run is split by day instead (next test).
+    if (D.localDate(startedAt) === D.localDate(endAt)) assert.equal(r.body.stopped[0].minutes, 45);
     assert.ok(r.body.stopped[0].key, 'stopped pieces carry their draft key');
     r = await t.call('POST', '/api/timer/start', { issue: 'APP-1215' });
     r = await t.call('POST', '/api/timer/stop', { discard: true });
@@ -264,6 +267,39 @@ test('setup, week, edit, remove, submit, timer, suggestions', async () => {
     assert.equal(cfg.token, 'secret');
   } finally {
     await t.done();
+  }
+});
+
+test('a timer left running past midnight becomes one draft per day', async () => {
+  const t = await setup();
+  let restarted = null;
+  let stopped = false;
+  try {
+    await t.call('POST', '/api/setup', { url: t.ytUrl, token: 'secret' });
+    await t.call('POST', '/api/timer/start', { issue: 'APP-1215' });
+    await t.app.stop();
+    stopped = true;
+    // As if it had been started yesterday at 23:50.
+    const day = D.addDays(D.localDate(), -1);
+    const startedAt = D.localMidnightMs(D.addDays(day, 1)) - 10 * 60000;
+    const file = path.join(t.dataDir, 'state.json');
+    const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+    state.timer.startedAt = startedAt;
+    fs.writeFileSync(file, JSON.stringify(state));
+    restarted = createApp({ port: 0, dataDir: t.dataDir });
+    const port = await restarted.start();
+    const res = await fetch(`http://127.0.0.1:${port}/api/timer/stop`, {
+      method: 'POST',
+      headers: { 'x-finito': '1', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endAt: startedAt + 47 * 60000 }),
+    });
+    const body = await res.json();
+    // 10 minutes before midnight, 37 after (rounded to 35).
+    assert.deepEqual(body.stopped.map((p) => [p.date, p.minutes]), [[day, 10], [D.addDays(day, 1), 35]]);
+  } finally {
+    if (!stopped) await t.app.stop();
+    if (restarted) await restarted.stop();
+    await t.mock.stop();
   }
 });
 
