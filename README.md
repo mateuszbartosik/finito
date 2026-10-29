@@ -13,7 +13,7 @@ Spent runs on your own computer. Nothing gets installed in YouTrack: Spent talks
 
 - **One line to log.** `APP-1207 1h30 review copy` in the bar at the bottom, Enter. Leave the time out and Enter starts a timer instead.
 - **A week you can type into.** Click a cell, or focus it and type a number. Totals per day fill a small meter toward your daily target; short days turn amber.
-- **Suggestions in place.** Your comments, field changes, attachments and commits in YouTrack show up as dashed values in the week. Click one to add it.
+- **Suggestions from your activity.** Your comments, field changes, attachments and commits in YouTrack show up as dashed values: in the week for issues already there, and in a panel under it for the rest. Click one to add it, use **Add all**, or dismiss the ones you don't need.
 - **Nothing reaches YouTrack until you submit.** Submit appears when there's something to send. It checks first, writes each change, and retries a network failure without creating duplicates.
 - **Undo** on every log, from the toast.
 
@@ -54,17 +54,18 @@ Press `/` anywhere to jump to the bar. A running timer sits at the left end of t
 ## The week
 
 - Click a cell, or focus it and type a number, to edit: time, −/+ 15 minutes, type, note. Enter saves, Tab goes to the next day, ↑ ↓ to the next row, Esc cancels. Arrow keys move between cells.
+- A cell can hold more than one entry, say Research and Development on the same day: open it and choose **Add another entry**.
 - Hover a row for ▶ (start a timer on it). **Add issue** puts any issue in the week before you log on it. An empty week offers last week's issues.
 - Cells: plain = in YouTrack, blue with a dot = not sent yet, struck through = will be removed, red dot = the last send failed (the reason is in the cell's editor), dashed = a suggestion.
 - Days off are hidden unless something happened on them.
 
 ## Settings
 
-Daily target, work days, end of your day, timer rounding, and a **default work type per project**. Some projects have no "Design" type, so pick what your usual work goes in as, once. Setting a default also fills drafts that don't have a type yet.
+Daily target, work days, end of your day, timer rounding, light or dark theme, and a **default work type per project**. Some projects have no "Design" type, so pick what your usual work goes in as, once. Setting a default also fills drafts that don't have a type yet.
 
 ## Look
 
-Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the edges of the glass also bend what's behind them; other browsers get the frosted version. Spent follows your system's light or dark mode, and its Reduce transparency, Increase contrast and Reduce motion settings.
+Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the edges of the glass also bend what's behind them; other browsers get the frosted version. Spent follows your system's light or dark mode unless you pick one in Settings, and its Reduce transparency, Increase contrast and Reduce motion settings.
 
 ## Where your data lives
 

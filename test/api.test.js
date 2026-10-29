@@ -231,6 +231,13 @@ test('setup, week, edit, remove, submit, timer, suggestions', async () => {
     r = await t.call('POST', '/api/suggestions/dismiss', { id: studio.id });
     r = await t.call('GET', '/api/suggestions?start=' + monday);
     assert.ok(!r.body.suggestions.find((x) => x.id === studio.id));
+    // Undo brings it back; dismiss it again for the rest of the test.
+    await t.call('POST', '/api/suggestions/restore', { ids: [studio.id] });
+    r = await t.call('GET', '/api/suggestions?start=' + monday);
+    assert.ok(r.body.suggestions.find((x) => x.id === studio.id));
+    await t.call('POST', '/api/suggestions/dismiss', { ids: [studio.id] });
+    r = await t.call('GET', '/api/suggestions?start=' + monday);
+    assert.ok(!r.body.suggestions.find((x) => x.id === studio.id));
 
     // Rows: add one, then copy last week's (skips the resolved APP-1188).
     r = await t.call('POST', '/api/rows', { monday, action: 'add', issue: 'APP-1230' });

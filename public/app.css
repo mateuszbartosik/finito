@@ -17,6 +17,7 @@
   --accent: #0a66ff;
   --accent-ink: #0050d4;
   --accent-soft: rgb(10 102 255 / 0.11);
+  --accent-wash: rgb(10 102 255 / 0.08);
   --accent-fill: #0b57e3;
   --accent-glow: rgb(10 102 255 / 0.55);
   --warn: #a35400;
@@ -37,6 +38,8 @@
   --rim-b: rgb(255 255 255 / 0.14);
   --rim-c: rgb(255 255 255 / 0.55);
   --glass-shadow: 0 18px 40px -16px rgb(16 24 40 / 0.32), 0 3px 8px -3px rgb(16 24 40 / 0.14);
+  --menu-edge: rgb(13 20 36 / 0.08);
+  --menu-shadow: 0 28px 60px -22px rgb(16 24 40 / 0.4), 0 8px 20px -8px rgb(16 24 40 / 0.18);
   --field: rgb(13 20 36 / 0.045);
   --field-focus: rgb(255 255 255 / 0.92);
 
@@ -67,6 +70,7 @@
     --accent: #3d8bff;
     --accent-ink: #86b6ff;
     --accent-soft: rgb(61 139 255 / 0.18);
+    --accent-wash: rgb(61 139 255 / 0.12);
     --accent-fill: #2563d9;
     --accent-glow: rgb(61 139 255 / 0.55);
     --warn: #f7b955;
@@ -86,6 +90,8 @@
     --rim-b: rgb(255 255 255 / 0.04);
     --rim-c: rgb(255 255 255 / 0.18);
     --glass-shadow: 0 20px 44px -14px rgb(0 0 0 / 0.65), 0 3px 10px -3px rgb(0 0 0 / 0.4);
+    --menu-edge: rgb(255 255 255 / 0.1);
+    --menu-shadow: 0 28px 60px -20px rgb(0 0 0 / 0.75), 0 8px 20px -8px rgb(0 0 0 / 0.45);
     --field: rgb(255 255 255 / 0.055);
     --field-focus: rgb(255 255 255 / 0.1);
     --blob-1: rgb(48 88 255 / 0.46);
@@ -109,6 +115,7 @@
   --accent: #3d8bff;
   --accent-ink: #86b6ff;
   --accent-soft: rgb(61 139 255 / 0.18);
+  --accent-wash: rgb(61 139 255 / 0.12);
   --accent-fill: #2563d9;
   --accent-glow: rgb(61 139 255 / 0.55);
   --warn: #f7b955;
@@ -128,6 +135,8 @@
   --rim-b: rgb(255 255 255 / 0.04);
   --rim-c: rgb(255 255 255 / 0.18);
   --glass-shadow: 0 20px 44px -14px rgb(0 0 0 / 0.65), 0 3px 10px -3px rgb(0 0 0 / 0.4);
+  --menu-edge: rgb(255 255 255 / 0.1);
+  --menu-shadow: 0 28px 60px -20px rgb(0 0 0 / 0.75), 0 8px 20px -8px rgb(0 0 0 / 0.45);
   --field: rgb(255 255 255 / 0.055);
   --field-focus: rgb(255 255 255 / 0.1);
   --blob-1: rgb(48 88 255 / 0.46);
@@ -309,13 +318,14 @@ kbd { font-family: var(--mono); }
 }
 .paper-note { margin: 4px 14px 8px; font-size: 12.5px; color: var(--warn); }
 
-.wgrid-scroll { overflow-x: auto; border-radius: calc(var(--r-xl) - 8px); }
-.wgrid { min-width: var(--min); }
+.wgrid-scroll { overflow-x: auto; border-radius: calc(var(--r-xl) - 8px); container-type: inline-size; }
+.wgrid { min-width: var(--min); --sugg-in: 6px; }
 .wrow { position: relative; display: grid; grid-template-columns: var(--cols); min-height: 56px; border-radius: 18px; }
 .wrow + .wrow::before { content: ""; position: absolute; left: 14px; right: 14px; top: 0; height: 1px; background: var(--hair); }
 .wrow:hover + .wrow::before, .wrow.ghead + .wrow::before, .wrow.section + .wrow::before, .wrow.section::before { opacity: 0; }
-.wrow:not(.ghead):not(.section):not(.addline):hover { background: var(--field); }
-.wrow:not(.ghead):not(.section):not(.addline):hover::before { opacity: 0; }
+/* :where keeps this low in specificity, so a section (the suggestions panel) can tint its own rows */
+.wrow:where(:not(.ghead, .section, .addline)):hover { background: var(--field); }
+.wrow:where(:not(.ghead, .section, .addline)):hover::before { opacity: 0; }
 
 .ghead { min-height: 70px; }
 .hcell { display: flex; align-items: flex-end; padding: 0 16px 12px; font-size: 12px; color: var(--ink-3); }
@@ -358,6 +368,7 @@ kbd { font-family: var(--mono); }
 .row-x { margin-left: auto; width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; color: var(--ink-3); opacity: 0; transition: opacity 0.15s; }
 .wrow:hover .row-x, .row-x:focus-visible { opacity: 1; }
 .row-x:hover { background: var(--hair-2); color: var(--ink); }
+@media (hover: none) { .row-x { opacity: 1; } }
 .wrow.timing .isum { color: var(--accent-ink); }
 
 .cell { position: relative; display: flex; align-items: center; justify-content: center; padding: 6px 5px; }
@@ -428,17 +439,44 @@ kbd { font-family: var(--mono); }
 
 .wrow.section { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 14px 16px 2px 10px; }
 .section-label { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
-.section-label .icon, .add-btn .icon { width: 28px; flex: none; }
+.section-label .icon { width: 28px; flex: none; }
 .section-label .icon { color: var(--accent-ink); }
 .ghost-row .isum { color: var(--ink-2); }
 
-.wrow.addline { display: block; min-height: 0; padding: 6px 6px 2px 4px; }
-.add-btn { display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 0 6px; border-radius: 14px; color: var(--ink-2); font-size: 13.5px; transition: background 0.15s, color 0.15s; }
-.add-btn:hover { background: var(--field); color: var(--ink); }
-.addissue { max-width: 560px; padding: 2px 2px 6px; }
+/* the table ends with a centered Add issue; the search that replaces it takes the full width */
+.wrow.addline { display: block; min-height: 0; padding: 8px 0 6px; text-align: center; }
+.wrow.addline::before { opacity: 0; }
+/* pinned to the visible part of the week, so it stays centered (and the search stays on screen) when the week scrolls sideways */
+.addcell { position: sticky; left: 0; width: 100cqw; }
+/* a dashed slot where the next row goes, so it reads as part of the table rather than floating */
+.add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 44px; padding: 0 16px; border: 1.5px dashed var(--ink-4); border-radius: 16px; color: var(--ink-2); font-size: 13.5px; font-weight: 500; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.add-btn .icon { flex: none; }
+.add-btn:hover { background: color-mix(in oklab, var(--accent) 6%, transparent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); color: var(--accent-ink); }
+.add-btn:focus-visible { outline: 2px solid transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+.addissue { text-align: left; }
+/* suggestions stand apart from the week: their own tinted panel, still on the day columns */
+.sugg { margin: 16px 0 2px; padding-bottom: var(--sugg-in); border-radius: 18px; background: color-mix(in oklab, var(--accent) 5%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 16%, transparent); }
+/* its rows sit inset, so a hovered row keeps clear of the panel's edge; the paddings give the inset back, so text lines up with the week */
+.sugg .wrow { margin: 0 var(--sugg-in); border-radius: calc(18px - var(--sugg-in)); grid-template-columns: var(--cols-in); }
+.sugg .wrow + .wrow::before { left: calc(14px - var(--sugg-in)); right: calc(14px - var(--sugg-in)); }
+.sugg .wrow.section { min-height: 44px; padding: 10px calc(14px - var(--sugg-in)) 0 calc(10px - var(--sugg-in)); }
+.sugg .issue { padding-left: calc(10px - var(--sugg-in)); }
+.sugg .rtotal { padding-right: calc(18px - var(--sugg-in)); }
+/* hover deepens the panel's own tint instead of turning grey */
+.sugg .wrow.ghost-row:hover { background: var(--accent-wash); }
 .addissue-field { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 6px 0 14px; border-radius: 16px; background: var(--paper-solid); box-shadow: inset 0 0 0 2px var(--accent), 0 8px 20px -10px var(--accent-glow); color: var(--ink-3); }
 .addissue-field input { flex: 1; min-width: 0; border: 0; background: none; outline: 2px solid transparent; font-size: 14.5px; color: var(--ink); }
-.results { margin-top: 6px; display: flex; flex-direction: column; gap: 1px; max-height: 300px; overflow: auto; }
+/* about five rows, then it scrolls; the edge that hides more fades out */
+/* the results drop down on the layer above the page, like the selects */
+/* more opaque than the controls and lifted off the card, so it reads as a list over the week, not part of it */
+.glass.addmenu { position: fixed; display: flex; flex-direction: column; padding: 6px; border-radius: 18px; pointer-events: auto; transform-origin: 50% 0; background: color-mix(in srgb, var(--paper-solid) 90%, transparent); box-shadow: inset 0 1px 0 0 var(--rim-a), 0 0 0 1px var(--menu-edge), var(--menu-shadow); }
+.glass.addmenu.up { transform-origin: 50% 100%; }
+.glass.addmenu.in { animation: menu-in 0.24s var(--ease-settle); }
+@keyframes menu-in { from { opacity: 0; transform: scale(0.98); } }
+.results { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1px; max-height: 212px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--hair-2) transparent; }
+.results[data-fade="end"] { -webkit-mask-image: linear-gradient(#000 calc(100% - 28px), transparent); mask-image: linear-gradient(#000 calc(100% - 28px), transparent); }
+.results[data-fade="start"] { -webkit-mask-image: linear-gradient(transparent, #000 28px); mask-image: linear-gradient(transparent, #000 28px); }
+.results[data-fade="both"] { -webkit-mask-image: linear-gradient(transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .result { display: flex; gap: 12px; align-items: baseline; text-align: left; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; }
 .result .mono { color: var(--ink-2); font-size: 12px; flex: none; }
 .result.hi { background: var(--accent-soft); }
@@ -447,6 +485,108 @@ kbd { font-family: var(--mono); }
 .empty p { margin: 0 0 14px; font-size: 15px; color: var(--ink); }
 .empty .hint { margin: 14px 0 0; font-size: 13px; color: var(--ink-3); }
 .empty-acts { display: flex; justify-content: center; gap: 8px; }
+
+/* ---------- select ----------
+   After Arc UI's morph select: a pill (or a field) that grows into its list on a spring with a
+   hint of bounce, and folds back without one. */
+:root {
+  --ease-grow: cubic-bezier(0.2, 1.08, 0.3, 1);
+  --ease-settle: cubic-bezier(0.25, 1, 0.35, 1);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-grow: linear(0, 0.028, 0.0979, 0.1925, 0.2986, 0.407, 0.5112, 0.6072, 0.6925, 0.7662, 0.8281, 0.8789, 0.9195, 0.9511, 0.9749, 0.9923, 1.0045, 1.0124, 1.0171, 1.0194, 1.0199, 1.0192, 1.0177, 1.0158, 1.0137, 1.0115, 1.0095, 1.0076, 1);
+    --ease-settle: linear(0, 0.0315, 0.1055, 0.1998, 0.3004, 0.3989, 0.4904, 0.5726, 0.6447, 0.7069, 0.7596, 0.804, 0.8409, 0.8714, 0.8964, 0.9168, 0.9334, 0.9468, 0.9576, 0.9663, 0.9733, 0.9788, 0.9833, 0.9868, 0.9896, 0.9918, 0.9936, 0.9949, 1);
+  }
+}
+.sel { position: relative; display: inline-flex; flex: none; min-width: 0; }
+.sel.fill { display: flex; flex: 1 1 auto; width: 100%; }
+.sel-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 36px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  outline: 2px solid transparent;
+  background: var(--paper-solid);
+  box-shadow: inset 0 0 0 1px var(--hair-2), 0 1px 2px -1px rgb(16 24 40 / 0.14);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: width 0.44s var(--ease-settle), background-color 0.15s, box-shadow 0.15s, opacity 0.16s 0.2s;
+}
+.sel-trigger.field { height: 36px; border-radius: 11px; background: var(--field); box-shadow: inset 0 0 0 1px var(--hair); font-weight: 450; }
+@media (hover: hover) and (pointer: fine) {
+  .sel-trigger:hover { background: var(--field-focus); }
+}
+.sel-trigger:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.sel-trigger[aria-expanded="true"] { opacity: 0; transition: opacity 0s; }
+.sel-measure { position: absolute; visibility: hidden; white-space: nowrap; pointer-events: none; }
+.sel-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sel-value.roll-up { animation: sel-roll-up 0.3s var(--ease-settle); }
+.sel-value.roll-down { animation: sel-roll-down 0.3s var(--ease-settle); }
+@keyframes sel-roll-up { from { opacity: 0; transform: translateY(65%); } }
+@keyframes sel-roll-down { from { opacity: 0; transform: translateY(-65%); } }
+.sel-chev { position: absolute; top: 50%; right: 12px; display: flex; width: 16px; height: 16px; margin-top: -8px; color: var(--ink-3); transition: transform 0.3s var(--ease-settle); }
+
+.sel-layer { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.glass.sel-surface {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  transition: width 0.52s var(--ease-grow), height 0.52s var(--ease-grow), border-radius 0.52s var(--ease-grow), opacity 0.16s;
+}
+.sel-surface[data-dir="up"] { flex-direction: column-reverse; }
+.glass.sel-surface[data-state="closing"] {
+  opacity: 0;
+  pointer-events: none;
+  transition: width 0.38s var(--ease-settle), height 0.38s var(--ease-settle), border-radius 0.38s var(--ease-settle), opacity 0.16s 0.2s;
+}
+.sel-head { position: relative; flex: none; display: flex; align-items: center; height: var(--sel-h, 34px); padding: 0 36px 0 14px; font-size: 14px; font-weight: 500; color: var(--ink); white-space: nowrap; cursor: pointer; }
+.sel-surface.field .sel-head { font-weight: 450; }
+.sel-surface[data-state="open"] .sel-head .sel-chev { transform: rotate(180deg); }
+.sel-divider { flex: none; height: 1px; margin: 0 14px; background: var(--hair-2); opacity: 0; transition: opacity 0.2s 0.06s; }
+/* scrolling switches on only once the surface has settled, so no scrollbar flashes while it grows */
+.sel-scroll { flex: 1 1 auto; min-height: 0; padding: 6px; overflow: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--hair-2) transparent; opacity: 0; transition: opacity 0.2s 0.08s; }
+.sel-surface[data-settled="1"] .sel-scroll { overflow-y: auto; }
+.sel-surface[data-state="open"] .sel-divider,
+.sel-surface[data-state="open"] .sel-scroll { opacity: 1; }
+.sel-surface[data-state="closing"] .sel-divider,
+.sel-surface[data-state="closing"] .sel-scroll { opacity: 0; transition: opacity 0.1s; }
+.sel-list { position: relative; display: flex; flex-direction: column; gap: 2px; width: max-content; min-width: 100%; }
+.sel-hl { position: absolute; top: 0; left: 0; right: 0; height: 34px; border-radius: 16px; background: color-mix(in oklab, var(--ink) 7%, transparent); opacity: 0; pointer-events: none; transition: transform 0.3s var(--ease-settle), height 0.3s var(--ease-settle), opacity 0.12s; }
+.sel-opt { position: relative; display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px 0 12px; border-radius: 16px; font-size: 14px; color: var(--ink-2); white-space: nowrap; cursor: pointer; -webkit-user-select: none; user-select: none; }
+.sel-opt.active, .sel-opt[aria-selected="true"] { color: var(--ink); }
+.sel-opt[aria-selected="true"] { font-weight: 560; }
+.sel-opt[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.sel-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sel-meta { flex: none; font-size: 12px; font-weight: 450; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sel-check { flex: none; display: flex; width: 16px; height: 16px; color: var(--accent); opacity: 0; transform: scale(0.6); transition: opacity 0.12s, transform 0.3s var(--ease-grow); }
+.sel-opt[aria-selected="true"] .sel-check { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  /* no growing or gliding: the list fades in and out where it opens */
+  .glass.sel-surface, .glass.sel-surface[data-state="closing"] { transition-property: opacity !important; transition-duration: 0.12s !important; transition-delay: 0s !important; }
+  .glass.sel-surface[data-state="start"] { opacity: 0; }
+  .glass.addmenu.in { animation: fade 0.12s; }
+}
+@media (forced-colors: active) {
+  .glass.sel-surface, .glass.addmenu { border: 1px solid CanvasText; }
+  .sel-trigger { border: 1px solid ButtonText; }
+  .sel-opt.active { outline: 2px solid Highlight; outline-offset: -2px; }
+}
 
 /* ---------- popovers ---------- */
 
@@ -466,6 +606,11 @@ kbd { font-family: var(--mono); }
 .ed-day { color: var(--ink-2); }
 .ed-sum { font-size: 14px; font-weight: 520; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ed-time { display: flex; align-items: center; gap: 8px; }
+.ed-add { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 30px; margin: -4px 0 -2px -8px; padding: 0 10px 0 8px; border: 0; border-radius: 999px; background: transparent; font-size: 13px; font-weight: 500; color: var(--accent-ink); cursor: pointer; outline: 2px solid transparent; }
+@media (hover: hover) and (pointer: fine) { .ed-add:not(:disabled):hover { background: var(--accent-soft); } }
+.ed-add:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.ed-add:disabled { color: var(--ink-3); opacity: 0.6; cursor: default; }
+.item-t.bad, .item-t.bad:focus { box-shadow: inset 0 0 0 2px var(--danger); }
 .ed-input {
   flex: 1;
   min-width: 0;
@@ -662,13 +807,16 @@ kbd { font-family: var(--mono); }
 .sheet-body { display: flex; flex-direction: column; gap: 14px; padding: 8px 24px 8px; overflow: auto; }
 .sheet-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 20px; }
 
-.group { border-radius: 20px; background: var(--field); box-shadow: inset 0 0 0 1px var(--hair); }
+/* 4px at the bottom gives the last row the same 12px to the edge as the title has at the top */
+.group { padding-bottom: 4px; border-radius: 20px; background: var(--field); box-shadow: inset 0 0 0 1px var(--hair); }
 .group-title { padding: 12px 16px 2px; font-size: 12.5px; font-weight: 560; color: var(--ink-2); }
 .srow { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 50px; padding: 6px 12px 6px 16px; font-size: 14px; }
 .srow + .srow { border-top: 1px solid var(--hair); }
-.srow input, .srow select { height: 34px; padding: 0 10px; border: 0; border-radius: 11px; background: var(--paper-solid); box-shadow: inset 0 0 0 1px var(--hair-2); font-size: 14px; }
+.srow input { height: 34px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--paper-solid); box-shadow: inset 0 0 0 1px var(--hair-2), 0 1px 2px -1px rgb(16 24 40 / 0.14); font-size: 14px; }
 .srow input:focus, .srow select:focus { outline: 2px solid transparent; box-shadow: inset 0 0 0 2px var(--accent); }
 .in-sm { width: 120px; text-align: right; }
+/* the account row has two lines of text; this keeps its spacing equal to the other groups' */
+.srow.account { padding-top: 8px; padding-bottom: 7px; }
 .in-md { width: 190px; }
 .srow-acts { display: flex; gap: 6px; }
 .daypick { display: flex; gap: 4px; }
@@ -772,6 +920,11 @@ kbd { font-family: var(--mono); }
   .paper { padding: 4px; border-radius: 24px; }
   .wgrid { --issue-w: 138px; --day-w: 68px; --total-w: 64px; }
   .issue { position: sticky; left: 0; z-index: 2; padding-left: 12px; background: color-mix(in srgb, var(--paper-solid) 92%, transparent); }
+  /* the same base as other pinned cells, plus the panel's own wash */
+  .sugg .issue { padding-left: calc(12px - var(--sugg-in)); border-radius: calc(18px - var(--sugg-in)) 0 0 calc(18px - var(--sugg-in)); background: linear-gradient(color-mix(in oklab, var(--accent) 5%, transparent), color-mix(in oklab, var(--accent) 5%, transparent)), color-mix(in srgb, var(--paper-solid) 92%, transparent); }
+  .sugg .rtotal { padding-right: calc(12px - var(--sugg-in)); }
+  .wrow:where(:not(.ghead, .section, .addline)):hover .issue { background: linear-gradient(var(--field), var(--field)), color-mix(in srgb, var(--paper-solid) 92%, transparent); }
+  .sugg .wrow.ghost-row:hover .issue { background: linear-gradient(var(--accent-wash), var(--accent-wash)), linear-gradient(color-mix(in oklab, var(--accent) 5%, transparent), color-mix(in oklab, var(--accent) 5%, transparent)), color-mix(in srgb, var(--paper-solid) 92%, transparent); }
   .play:not(.on) { display: none; }
   .isum { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13.5px; line-height: 1.3; }
   .rtotal { padding-right: 12px; }

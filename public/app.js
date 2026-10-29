@@ -16,6 +16,11 @@ const hhmm = (ms) => { const d = new Date(ms); return pad(d.getHours()) + ':' + 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const cellId = (issue, date) => `cell-${issue}-${date}`;
 const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Light or dark when picked in Settings, otherwise the system's. theme.js applies it before the first paint.
+const THEME_KEY = 'theme';
+const readTheme = () => { try { const t = localStorage.getItem(THEME_KEY); return t === 'light' || t === 'dark' ? t : 'system'; } catch (e) { return 'system'; } };
+const showTheme = (t) => { if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; };
+const saveTheme = (t) => { try { if (t === 'light' || t === 'dark') localStorage.setItem(THEME_KEY, t); else localStorage.removeItem(THEME_KEY); } catch (e) { /* no storage: it lasts until the page reloads */ } };
 
 function focusEditor() {
   const el = document.querySelector('.popover .ed-input') || document.querySelector('.popover');
@@ -102,6 +107,7 @@ const ICONS = {
   enter: '<path d="M19 6v5a3 3 0 0 1-3 3H6M10 10l-4 4 4 4"/>',
   warn: '<path d="M12 4.5L2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2h.01"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  chevron: '<path d="M6.5 9.5L12 15l5.5-5.5"/>',
 };
 
 function Icon({ name, size = 16, stroke = 2 }) {
@@ -117,6 +123,300 @@ function Glass({ as = 'div', refract = true, radius, bezel, scale, blur, sheen, 
   return html`<${Tag} ref=${ref} class=${'glass ' + cls} ...${rest}>${sheen ? html`<${Sheen} target=${ref} />` : null}${children}<//>`;
 }
 function Sheen({ target }) { useSheen(target); return null; }
+
+// ---------- select ----------
+// A designed select, after Arc UI's morph select: the trigger grows into the list, one highlight
+// glides between options, and the value rolls when it changes. The open surface is drawn in a layer
+// on <body>, so sheets and popovers can't clip it; focus stays on the trigger (aria-activedescendant).
+// Keys: arrows, Home/End, PageUp/PageDown, type-ahead, Enter or Space picks, Alt+↑ picks and closes,
+// Escape closes, Tab closes and moves on.
+
+const OPEN_RADIUS = 22;
+// Room kept clear of the bar at the bottom and the buttons at the top; the most a result list shows before it scrolls.
+const DOCK_ROOM = 104;
+const TOP_ROOM = 88;
+const RESULTS_MAX = 212;
+const QUARTERS = Array.from({ length: 96 }, (_, i) => pad(Math.floor(i / 4)) + ':' + pad((i % 4) * 15));
+let selectCount = 0;
+
+// Renders its children into a layer on <body>.
+function Layer({ children }) {
+  const host = useRef(null);
+  if (!host.current) {
+    host.current = document.createElement('div');
+    host.current.className = 'sel-layer';
+    host.current.dataset.layer = 'select';
+  }
+  useLayoutEffect(() => {
+    document.body.appendChild(host.current);
+    return () => { render(null, host.current); host.current.remove(); };
+  }, []);
+  useLayoutEffect(() => { render(children, host.current); });
+  return null;
+}
+
+function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill', fill = false, align = 'auto', minWidth = 0, maxListHeight = 296 }) {
+  const [uid] = useState(() => id || 'sel-' + (++selectCount));
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(false); // the surface exists, also while it folds back
+  const [active, setActive] = useState(-1);
+  const trig = useRef(null);
+  const surf = useRef(null);
+  const scroller = useRef(null);
+  const hl = useRef(null);
+  const geo = useRef(null);
+  const keyNav = useRef(false);
+  const typed = useRef({ s: '', t: 0 });
+  const closeTimer = useRef(0);
+  const settleTimer = useRef(0);
+  const lastSel = useRef(null);
+  const n = options.length;
+  const sel = Math.max(0, options.findIndex((o) => o.value === value));
+  const cur = options[sel] || { value: '', label: '' };
+  const roll = lastSel.current === null || lastSel.current === sel ? '' : sel > lastSel.current ? ' roll-up' : ' roll-down';
+  useEffect(() => { lastSel.current = sel; }, [sel]);
+  useEffect(() => () => { clearTimeout(closeTimer.current); clearTimeout(settleTimer.current); }, []);
+
+  // The closed trigger sizes to its label, and springs when the label changes.
+  useLayoutEffect(() => {
+    const t = trig.current;
+    if (fill || !t) return;
+    const cs = getComputedStyle(t);
+    const m = t.querySelector('.sel-measure').getBoundingClientRect().width;
+    t.style.width = Math.max(minWidth, Math.ceil(m + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight))) + 'px';
+  }, [cur.label, minWidth, fill]);
+
+  const measure = () => {
+    const t = trig.current;
+    const list = surf.current.querySelector('.sel-list');
+    const r = t.getBoundingClientRect();
+    // fixed boxes measure from inside the scrollbars, so use the document's client size
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const m = 12;
+    const want = r.height + 1 + Math.min(list.offsetHeight + 12, maxListHeight);
+    const below = vh - r.top - m;
+    const above = r.bottom - m;
+    const up = want > below && above > below;
+    const w = Math.min(Math.max(r.width, list.scrollWidth + 12, 168), vw - 2 * m);
+    const radius = Math.min(parseFloat(getComputedStyle(t).borderTopLeftRadius) || 0, r.height / 2);
+    // Grow toward the side that keeps the list inside its sheet or editor (and always on screen).
+    const box = t.closest('.sheet, .popover');
+    const cb = box ? box.getBoundingClientRect() : { left: 0, right: vw };
+    const fitsStart = r.left + w <= Math.min(vw - m, cb.right - 8);
+    const fitsEnd = r.right - w >= Math.max(m, cb.left + 8);
+    const onScreenEnd = r.right - w >= m;
+    const end = align === 'end' ? fitsEnd || (!fitsStart && onScreenEnd) : align === 'start' ? !fitsStart && fitsEnd : !fitsStart && onScreenEnd;
+    return { r, w, h: Math.min(want, up ? above : below), up, end, radius };
+  };
+  const apply = (g, opened) => {
+    const s = surf.current;
+    const { r } = g;
+    s.dataset.dir = g.up ? 'up' : 'down';
+    s.style.setProperty('--sel-h', r.height + 'px');
+    // Pin one edge on each axis and free the other ('auto'), or the stylesheet's left/top would win.
+    s.style.left = g.end ? 'auto' : r.left + 'px';
+    s.style.right = g.end ? document.documentElement.clientWidth - r.right + 'px' : 'auto';
+    s.style.top = g.up ? 'auto' : r.top + 'px';
+    s.style.bottom = g.up ? document.documentElement.clientHeight - r.bottom + 'px' : 'auto';
+    s.style.width = (opened ? g.w : r.width) + 'px';
+    s.style.height = (opened ? g.h : r.height) + 'px';
+    s.style.borderRadius = (opened ? OPEN_RADIUS : g.radius) + 'px';
+  };
+
+  // Open: start on the trigger's box, then grow into the list.
+  useLayoutEffect(() => {
+    if (!shown || !open || !surf.current) return;
+    clearTimeout(closeTimer.current);
+    const s = surf.current;
+    const g = measure();
+    geo.current = g;
+    s.style.transition = 'none';
+    s.dataset.state = 'start';
+    delete s.dataset.settled;
+    apply(g, false);
+    s.getBoundingClientRect();
+    s.style.transition = '';
+    s.dataset.state = 'open';
+    apply(g, true);
+    // The list may only scroll once the surface has finished growing; no scrollbar flashes on the way.
+    clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => { if (s.dataset.state === 'open') s.dataset.settled = '1'; }, reduceMotion() ? 130 : 560);
+    // Show the chosen option, judged against the list's open height, not the height it starts from.
+    const sc = scroller.current;
+    const o = s.querySelector('[aria-selected="true"]');
+    if (sc && o) {
+      const view = g.h - g.r.height - 1;
+      const y = o.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+      sc.scrollTop = sc.scrollHeight <= view ? 0 : Math.max(0, Math.min(sc.scrollHeight - view, y - (view - o.offsetHeight) / 2));
+    }
+  }, [shown, open]);
+
+  // Close: fold back onto the trigger, wherever it is now, then let it go.
+  useLayoutEffect(() => {
+    if (!shown || open) return;
+    if (!surf.current || !geo.current || !trig.current) { setShown(false); return; }
+    const g = Object.assign({}, geo.current, { r: trig.current.getBoundingClientRect() });
+    clearTimeout(settleTimer.current);
+    delete surf.current.dataset.settled;
+    surf.current.dataset.state = 'closing';
+    // With Reduce motion it just fades where it is.
+    if (!reduceMotion()) apply(g, false);
+    closeTimer.current = setTimeout(() => setShown(false), reduceMotion() ? 140 : 420);
+  }, [open]);
+
+  // One highlight glides to the active option; keyboard moves keep it in view.
+  useLayoutEffect(() => {
+    const h = hl.current;
+    const s = surf.current;
+    if (!h || !s) return;
+    const o = active >= 0 ? s.querySelector('#' + CSS.escape(`${uid}-o${active}`)) : null;
+    if (!o) { h.style.opacity = '0'; return; }
+    const first = h.dataset.placed !== '1';
+    if (first) h.style.transition = 'none';
+    h.style.transform = `translateY(${o.offsetTop}px)`;
+    h.style.height = o.offsetHeight + 'px';
+    h.style.opacity = '1';
+    if (first) { h.getBoundingClientRect(); h.style.transition = ''; h.dataset.placed = '1'; }
+    const sc = scroller.current;
+    if (sc && keyNav.current) {
+      const pad = 6;
+      const y = o.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+      if (y < sc.scrollTop + pad) sc.scrollTop = y - pad;
+      else if (y + o.offsetHeight > sc.scrollTop + sc.clientHeight - pad) sc.scrollTop = y + o.offsetHeight - sc.clientHeight + pad;
+    }
+  }, [active, shown]);
+
+  // While open: a press elsewhere closes it; the surface follows its trigger.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (surf.current && surf.current.contains(e.target)) return;
+      if (trig.current && trig.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onMove = (e) => {
+      if (e && e.target instanceof Node && surf.current && surf.current.contains(e.target)) return;
+      if (!surf.current || !trig.current) return;
+      const g = measure();
+      geo.current = g;
+      surf.current.style.transition = 'none';
+      apply(g, true);
+      surf.current.getBoundingClientRect();
+      surf.current.style.transition = '';
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+    };
+  }, [open]);
+
+  const openAt = (i, byKey) => {
+    keyNav.current = byKey;
+    setActive(i);
+    setOpen(true);
+    setShown(true);
+  };
+  const pick = (i) => {
+    const o = options[i];
+    if (o && !o.disabled && o.value !== value) onChange(o.value);
+    setOpen(false);
+  };
+  const usable = (i) => i >= 0 && i < n && !options[i].disabled;
+  const move = (from, d) => {
+    let i = from;
+    for (let k = 0; k < n; k++) {
+      const next = Math.max(0, Math.min(n - 1, i + d));
+      if (next === i) break;
+      i = next;
+      if (usable(i)) return i;
+      d = Math.sign(d);
+    }
+    return usable(from) ? from : sel;
+  };
+  // Type-ahead: characters typed in quick succession narrow the match; one character repeated cycles.
+  // Punctuation and spaces don't count, so 1730 finds 17:30.
+  const plain = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const findByText = (ch, from) => {
+    const now = Date.now();
+    const t = typed.current;
+    t.s = now - t.t > 700 ? ch : t.s + ch;
+    t.t = now;
+    const q = plain(t.s);
+    if (!q) return -1;
+    const cycling = [...q].every((c) => c === q[0]);
+    const needle = cycling ? q[0] : q;
+    const start = cycling ? from + 1 : Math.max(from, 0);
+    for (let k = 0; k < n; k++) {
+      const i = (start + k + n) % n;
+      if (usable(i) && plain(options[i].label).startsWith(needle)) return i;
+    }
+    return -1;
+  };
+  const onKey = (e) => {
+    if (!n) return;
+    const k = e.key;
+    const printable = k.length === 1 && k !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (!open) {
+      if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Enter' || k === ' ') { e.preventDefault(); openAt(sel, true); } else if (k === 'Home') { e.preventDefault(); openAt(move(-1, 1), true); } else if (k === 'End') { e.preventDefault(); openAt(move(n, -1), true); } else if (printable) {
+        const i = findByText(k, sel);
+        if (i >= 0) { e.preventDefault(); openAt(i, true); }
+      }
+      return;
+    }
+    keyNav.current = true;
+    if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); } else if (k === 'Tab') setOpen(false);
+    else if (k === 'ArrowDown') { e.preventDefault(); setActive(move(active, 1)); } else if (k === 'ArrowUp') { e.preventDefault(); if (e.altKey) pick(active); else setActive(move(active, -1)); } else if (k === 'PageDown') { e.preventDefault(); setActive(move(active, 8)); } else if (k === 'PageUp') { e.preventDefault(); setActive(move(active, -8)); } else if (k === 'Home') { e.preventDefault(); setActive(move(-1, 1)); } else if (k === 'End') { e.preventDefault(); setActive(move(n, -1)); } else if (k === 'Enter' || k === ' ') { e.preventDefault(); e.stopPropagation(); pick(usable(active) ? active : sel); } else if (printable) {
+      const i = findByText(k, active);
+      if (i >= 0) { e.preventDefault(); setActive(i); }
+    }
+  };
+  const onBlur = () => {
+    if (!open) return;
+    setTimeout(() => { if (trig.current && document.activeElement !== trig.current) setOpen(false); }, 0);
+  };
+
+  const listId = uid + '-list';
+  const chevron = html`<span class="sel-chev"><${Icon} name="chevron" size=${16} stroke=${1.75} /></span>`;
+  const surface = shown ? html`<${Layer}>
+    <div ref=${surf} class=${'glass glass-strong sel-surface' + (shape === 'field' ? ' field' : '')}>
+      <div class="sel-head" aria-hidden="true" onPointerDown=${(e) => e.preventDefault()} onClick=${() => setOpen(false)}>
+        <span class="sel-value">${cur.label}</span>${chevron}
+      </div>
+      <div class="sel-divider"></div>
+      <div class="sel-scroll" ref=${scroller} style=${{ maxHeight: maxListHeight + 'px' }}>
+        <div class="sel-list" id=${listId} role="listbox" aria-labelledby=${labelledBy || undefined} aria-label=${labelledBy ? undefined : label}>
+          <div class="sel-hl" ref=${hl} aria-hidden="true"></div>
+          ${options.map((o, i) => html`<div key=${o.value} id=${`${uid}-o${i}`} role="option"
+            aria-selected=${i === sel ? 'true' : 'false'} aria-disabled=${o.disabled ? 'true' : undefined}
+            class=${'sel-opt' + (i === active ? ' active' : '')}
+            onPointerMove=${(e) => { if (e.pointerType === 'mouse' && i !== active && usable(i)) { keyNav.current = false; setActive(i); } }}
+            onPointerDown=${(e) => e.preventDefault()}
+            onClick=${() => { if (usable(i)) pick(i); }}>
+            <span class="sel-label">${o.label}</span>${o.meta ? html`<span class="sel-meta">${o.meta}</span>` : null}
+            <span class="sel-check"><${Icon} name="check" size=${15} stroke=${2} /></span>
+          </div>`)}
+        </div>
+      </div>
+    </div>
+  <//>` : null;
+  return html`<span class=${'sel' + (fill ? ' fill' : '')}>
+    <button type="button" id=${uid} ref=${trig} class=${'sel-trigger' + (shape === 'field' ? ' field' : '')}
+      role="combobox" aria-haspopup="listbox" aria-expanded=${open ? 'true' : 'false'}
+      aria-controls=${shown ? listId : undefined}
+      aria-activedescendant=${open && active >= 0 ? `${uid}-o${active}` : undefined}
+      aria-labelledby=${labelledBy ? `${labelledBy} ${uid}` : undefined} aria-label=${labelledBy ? undefined : label}
+      onClick=${(e) => { if (e.detail === 0) return; if (open) setOpen(false); else openAt(sel, false); }}
+      onKeyDown=${onKey} onBlur=${onBlur}>
+      <span class="sel-measure" aria-hidden="true">${cur.label}</span>
+      <span key=${cur.value} class=${'sel-value' + roll}>${cur.label}</span>${chevron}
+    </button>${surface}
+  </span>`;
+}
 
 function Mark({ size = 28 }) {
   return html`<span class="mark" style=${{ width: size + 'px', height: size + 'px' }} aria-hidden="true">
@@ -470,6 +770,14 @@ function Main({ status, onReconnect, onUnauthorized }) {
     return true;
   };
 
+  // One more work item in a cell that may already hold some (another type on the same day).
+  const addEntry = (issue, date, minutes, extra = {}) => serial(() => run(() => {
+    const body = { issue, dates: [date], minutes };
+    if (extra.type !== undefined) body.type = extra.type;
+    if (extra.text) body.text = extra.text;
+    return api('POST', '/entries', body);
+  }));
+
   const nextCell = (issue, date, key, shift) => {
     const all = [...rowIds, ...ghostIds];
     const di = cols.indexOf(date);
@@ -529,10 +837,20 @@ function Main({ status, onReconnect, onUnauthorized }) {
     for (const s of list) inflight.current.delete(s.id);
     if (!r) loadSugg(week.monday);
   };
-  const dismissSuggestion = (s) => {
-    forgetSugg([s]);
-    api('POST', '/suggestions/dismiss', { id: s.id }).catch(() => {});
+  // Dismissing hides suggestions for good, so the toast offers Undo.
+  const dismissSuggestions = (list) => {
+    if (!list.length) return;
+    forgetSugg(list);
+    const ids = list.map((s) => s.id);
+    api('POST', '/suggestions/dismiss', { ids }).catch(() => {});
+    const what = list.length === 1 ? `${fmt(list[0].minutes)} on ${list[0].issue}` : `${plural(list.length, 'suggestion', 'suggestions')} for ${list[0].issue}`;
+    flash(`Dismissed ${what}`, 'info', { label: 'Undo', fn: async () => {
+      setToast(null);
+      try { await api('POST', '/suggestions/restore', { ids }); } catch (e) { flash(e.message, 'error'); return; }
+      if (weekRef.current) loadSugg(weekRef.current.monday);
+    } });
   };
+  const dismissSuggestion = (s) => dismissSuggestions([s]);
 
   // ---- dock: one line in, one action out ----
   const parsed = parseQuick(q, { dates, today, issues: known });
@@ -662,6 +980,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
           suggAt=${suggAt} suggestions=${suggestions} edit=${edit} rows=${week.rows}
           onOpen=${openEditor}
           onAccept=${acceptSuggestions} onDismiss=${dismissSuggestion}
+          onDismissIssue=${(id) => dismissSuggestions(suggestions.filter((x) => x.issue === id))}
           onTimer=${(id) => (timer && timer.issue === id ? stopTimer({}) : startTimer(id))}
           onRemoveRow=${(id) => run(() => api('POST', '/rows', { monday: week.monday, action: 'remove', issue: id }))}
           adding=${adding} setAdding=${setAdding}
@@ -703,6 +1022,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
           return commitCell(cur.issue, cur.date, text, extra);
         }}
         onClose=${(commit) => closeEditor(commit, true)}
+        onAdd=${addEntry}
         onPatch=${(e, c) => serial(() => run(() => patchRaw(e, c)))}
         onRemove=${(e) => serial(() => run(() => removeRaw(e), e.status === 'draft' ? 'Removed' : 'Will be removed when you submit'))}
         onRestore=${(e) => serial(() => run(() => restoreRaw(e), 'Kept'))}
@@ -759,6 +1079,9 @@ function WeekGrid(p) {
   const { cols, heads, today, rowIds, ghostIds, isWorkDay, cellEntries, liveOf, sum, issueInfo, ytLink, timer, runningOn, suggAt, suggestions, edit } = p;
   const template = {
     '--cols': `minmax(var(--issue-w, 200px), 1fr) repeat(${cols.length}, minmax(var(--day-w, 78px), 108px)) var(--total-w, 80px)`,
+    // Rows in the suggestions panel sit inset by --sugg-in on both sides. The first and last columns give up
+    // that inset, so the day columns stay exactly under the week's.
+    '--cols-in': `minmax(calc(var(--issue-w, 200px) - var(--sugg-in)), 1fr) repeat(${cols.length}, minmax(var(--day-w, 78px), 108px)) calc(var(--total-w, 80px) - var(--sugg-in))`,
     '--min': `calc(var(--issue-w, 200px) + ${cols.length} * var(--day-w, 78px) + var(--total-w, 80px))`,
   };
   const empty = !rowIds.length && !ghostIds.length;
@@ -834,6 +1157,7 @@ function WeekGrid(p) {
           <span class="isum" title=${info.summary}>${info.summary || (info.missing ? "Can't open this issue" : '—')}</span>
         </div>
         ${removable ? html`<button class="row-x" aria-label=${`Remove ${id} from this week`} title="Remove row" onClick=${() => p.onRemoveRow(id)}><${Icon} name="x" size=${12} stroke=${2.2} /></button>` : null}
+        ${ghost ? html`<button class="row-x" aria-label=${`Dismiss the suggestions for ${id}`} title="Dismiss" onClick=${() => p.onDismissIssue(id)}><${Icon} name="x" size=${12} stroke=${2.2} /></button>` : null}
       </div>
       ${cols.map((d) => cell(id, d, ghost))}
       <div class="rtotal">${total ? fmt(total) : ''}</div>
@@ -855,18 +1179,22 @@ function WeekGrid(p) {
         <div class="hcell end" role="columnheader">Total</div>
       </div>
       ${rowIds.map((id) => row(id, false))}
-      ${ghostIds.length ? html`<div class="wrow section" role="row" key="sugg-head">
-        <div class="section-label" role="rowheader"><${Icon} name="sparkle" size=${13} /> From your YouTrack activity</div>
-        <div class="section-act">
-          <button class="link" onClick=${() => p.onAccept(suggestions)}>Add all · ${fmt(ghostTotal)}</button>
-        </div>
-      </div>` : null}
-      ${ghostIds.map((id) => row(id, true))}
       <div class="wrow addline" role="row" key="add">
-        ${p.adding
-          ? html`<${AddIssue} onClose=${() => p.setAdding(false)} onPick=${p.onAddRow} exclude=${rowIds} />`
-          : html`<button class="add-btn" onClick=${() => p.setAdding(true)}><${Icon} name="plus" size=${14} /> Add issue</button>`}
+        <div class="addcell" role="gridcell">
+          ${p.adding
+            ? html`<${AddIssue} onClose=${() => p.setAdding(false)} onPick=${p.onAddRow} exclude=${rowIds} />`
+            : html`<button class="add-btn" onClick=${() => p.setAdding(true)}><${Icon} name="plus" size=${14} stroke=${2.2} /> Add issue</button>`}
+        </div>
       </div>
+      ${ghostIds.length ? html`<div class="sugg" role="rowgroup" key="sugg" aria-label="Suggested from your YouTrack activity">
+        <div class="wrow section" role="row">
+          <div class="section-label" role="rowheader"><${Icon} name="sparkle" size=${13} /> From your YouTrack activity</div>
+          <div class="section-act" role="gridcell">
+            <button class="link" onClick=${() => p.onAccept(suggestions)}>Add all · ${fmt(ghostTotal)}</button>
+          </div>
+        </div>
+        ${ghostIds.map((id) => row(id, true))}
+      </div>` : null}
     </div>
     ${empty ? html`<div class="empty">
       <p>Nothing logged this week yet.</p>
@@ -883,8 +1211,82 @@ function AddIssue({ onClose, onPick, exclude }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState('');
   const [hi, setHi] = useState(0);
+  const [fade, setFade] = useState('');
+  const [pos, setPos] = useState(null);
   const ref = useRef(null);
+  const box = useRef(null);
+  const field = useRef(null);
+  const menu = useRef(null);
+  const res = useRef(null);
+  const posRef = useRef(null);
+  const revealed = useRef(false);
   useLayoutEffect(() => { if (ref.current) ref.current.focus(); }, []);
+  // The list stops at a few rows and scrolls; soft edges say there's more.
+  const edges = () => {
+    const r = res.current;
+    if (!r) return;
+    const more = r.scrollHeight - r.clientHeight > 1;
+    const atTop = r.scrollTop < 2;
+    const atEnd = r.scrollTop + r.clientHeight >= r.scrollHeight - 2;
+    const f = !more ? '' : atTop ? 'end' : atEnd ? 'start' : 'both';
+    setFade((prev) => (prev === f ? prev : f));
+  };
+  // The results drop down from the field on the layer above the page. Near the bar at the bottom,
+  // they open upward instead.
+  const place = () => {
+    const f = field.current;
+    const r0 = res.current;
+    if (!f || !r0) return;
+    const r = f.getBoundingClientRect();
+    const vh = document.documentElement.clientHeight;
+    const gap = 6;
+    const want = Math.min(r0.scrollHeight, RESULTS_MAX) + 12;
+    const below = vh - DOCK_ROOM - r.bottom - gap;
+    const above = r.top - gap - 12;
+    const up = want > below && above > below;
+    const next = { left: Math.round(r.left), width: Math.round(r.width), y: Math.round(up ? vh - r.top + gap : r.bottom + gap), up, max: Math.max(64, Math.floor(up ? above : below)) };
+    const prev = posRef.current;
+    if (prev && prev.left === next.left && prev.width === next.width && prev.y === next.y && prev.up === next.up && prev.max === next.max) return;
+    posRef.current = next;
+    setPos(next);
+  };
+  // After every render: the list changes size as results come in.
+  useLayoutEffect(() => { place(); });
+  useLayoutEffect(() => {
+    const onMove = () => requestAnimationFrame(place);
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    // A press anywhere else closes the search, like any dropdown.
+    const onDown = (e) => {
+      if (box.current && box.current.contains(e.target)) return;
+      if (menu.current && menu.current.contains(e.target)) return;
+      onClose();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => {
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+      document.removeEventListener('pointerdown', onDown, true);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const r = res.current;
+    const o = r && r.querySelector('.result.hi');
+    if (o) {
+      if (o.offsetTop < r.scrollTop + 4) r.scrollTop = o.offsetTop - 4;
+      else if (o.offsetTop + o.offsetHeight > r.scrollTop + r.clientHeight - 4) r.scrollTop = o.offsetTop + o.offsetHeight - r.clientHeight + 4;
+    }
+    edges();
+  }, [hi, list, pos]);
+  // When results first arrive, scroll the page so they fit under the field, without pushing it under the top bar.
+  useLayoutEffect(() => {
+    if (list === null || revealed.current || !field.current || !res.current) return;
+    revealed.current = true;
+    const r = field.current.getBoundingClientRect();
+    const want = Math.min(res.current.scrollHeight, RESULTS_MAX) + 12 + 6;
+    const by = Math.min(want - (document.documentElement.clientHeight - DOCK_ROOM - r.bottom), r.top - TOP_ROOM);
+    if (by > 0) window.scrollBy({ top: by, behavior: reduceMotion() ? 'auto' : 'smooth' });
+  }, [list]);
   useEffect(() => {
     let alive = true;
     const t = setTimeout(() => {
@@ -894,11 +1296,21 @@ function AddIssue({ onClose, onPick, exclude }) {
     }, q ? 280 : 0);
     return () => { alive = false; clearTimeout(t); };
   }, [q]);
-  const items = (list || []).slice(0, 8);
-  return html`<div class="addissue">
-    <div class="addissue-field">
+  const items = (list || []).slice(0, 15);
+  const style = pos
+    ? { left: pos.left + 'px', width: pos.width + 'px', top: pos.up ? 'auto' : pos.y + 'px', bottom: pos.up ? pos.y + 'px' : 'auto', maxHeight: pos.max + 'px' }
+    : { left: '0px', top: '0px', opacity: 0, pointerEvents: 'none' };
+  return html`<div class="addissue" ref=${box}
+    onFocusOut=${(e) => {
+      // Tabbing away closes it too; a press on a result keeps focus in the field.
+      const t = e.relatedTarget;
+      if (!t || (box.current && box.current.contains(t)) || (menu.current && menu.current.contains(t))) return;
+      onClose();
+    }}>
+    <div class="addissue-field" ref=${field}>
       <${Icon} name="search" size=${15} />
       <input id="rowq" ref=${ref} value=${q} placeholder="Find an issue: ID or a few words" autocomplete="off" aria-label="Find an issue to add"
+        role="combobox" aria-expanded="true" aria-controls="rowq-list" aria-autocomplete="list" aria-activedescendant=${items[hi] ? 'rowq-o' + hi : undefined}
         onInput=${(e) => setQ(e.target.value)}
         onKeyDown=${(e) => {
           if (e.key === 'Escape') onClose();
@@ -906,13 +1318,18 @@ function AddIssue({ onClose, onPick, exclude }) {
         }} />
       <button class="btn btn-quiet btn-sm" onClick=${onClose}>Cancel</button>
     </div>
-    <div class="results" role="listbox" aria-label="Issues">
-      ${err ? html`<div class="err-line">${err}</div>` : null}
-      ${list === null ? html`<div class="muted small pad">Searching…</div>`
-        : items.length ? items.map((i, n) => html`<button key=${i.idReadable} role="option" aria-selected=${n === hi} class=${'result' + (n === hi ? ' hi' : '')} onClick=${() => onPick(i)} onMouseEnter=${() => setHi(n)}>
-          <span class="mono">${i.idReadable}</span><span class="ell">${i.summary}</span></button>`)
-          : html`<div class="muted small pad">No issues match.</div>`}
-    </div>
+    <${Layer}>
+      <div class=${'glass glass-strong addmenu' + (pos ? ' in' : '') + (pos && pos.up ? ' up' : '')} ref=${menu} style=${style}>
+        <div class="results" id="rowq-list" ref=${res} data-fade=${fade || undefined} onScroll=${edges} role="listbox" aria-label="Issues">
+          ${err ? html`<div class="err-line pad">${err}</div>` : null}
+          ${list === null ? html`<div class="muted small pad">Searching…</div>`
+            : items.length ? items.map((i, n) => html`<button key=${i.idReadable} id=${'rowq-o' + n} role="option" tabindex="-1" aria-selected=${n === hi} class=${'result' + (n === hi ? ' hi' : '')}
+              onPointerDown=${(e) => e.preventDefault()} onClick=${() => onPick(i)} onPointerMove=${(e) => { if (e.pointerType === 'mouse' && n !== hi) setHi(n); }}>
+              <span class="mono">${i.idReadable}</span><span class="ell">${i.summary}</span></button>`)
+              : html`<div class="muted small pad">No issues match.</div>`}
+        </div>
+      </div>
+    <//>
   </div>`;
 }
 
@@ -929,7 +1346,7 @@ function Popover({ anchorId, onDismiss, onEscape, children, width = 340 }) {
     const r = a.getBoundingClientRect();
     const w = Math.min(width, window.innerWidth - 24);
     const h = el.offsetHeight;
-    const dock = 104;
+    const dock = DOCK_ROOM;
     let left = r.left + r.width / 2 - w / 2;
     left = Math.round(Math.max(12, Math.min(left, window.innerWidth - w - 12)));
     let top = r.bottom + 8;
@@ -951,6 +1368,8 @@ function Popover({ anchorId, onDismiss, onEscape, children, width = 340 }) {
     if (ro) { if (ref.current) ro.observe(ref.current); const pg = document.querySelector('.page'); if (pg) ro.observe(pg); }
     const onDown = (e) => {
       if (ref.current && ref.current.contains(e.target)) return;
+      // An open select inside the editor draws its list on another layer.
+      if (e.target instanceof Element && e.target.closest('[data-layer="select"]')) return;
       const a = document.getElementById(anchorId);
       if (a && a.contains(e.target)) return;
       onDismiss();
@@ -980,8 +1399,18 @@ function CellEditor(props) {
   const { issue, date, initial, info, ytLink, entries, liveOf, sum, types, defType, timerHere } = props;
   const lv = liveOf(entries);
   const cur = sum(lv);
-  const single = entries.length <= 1;
+  // "Add another entry" turns a one-entry cell into the list, so a day can hold Research and Development.
+  const [listOpen, setListOpen] = useState(false);
+  const [newRow, setNewRow] = useState(false);
+  const single = entries.length <= 1 && !listOpen;
   const item = single ? entries[0] || null : null;
+  const addBtn = useRef(null);
+  const hadNewRow = useRef(false);
+  useLayoutEffect(() => {
+    // After a new entry is added, focus waits on the button for the next one.
+    if (hadNewRow.current && !newRow && addBtn.current) addBtn.current.focus();
+    hadNewRow.current = newRow;
+  }, [newRow]);
   const hasInitial = initial !== null && initial !== undefined;
   // Frozen when the editor opens: a suggestion that disappears later must not turn into a log.
   const [suggestion] = useState(props.suggestion || null);
@@ -1037,6 +1466,19 @@ function CellEditor(props) {
   };
   const cancel = () => { cancelled.current = true; done.current = true; };
   props.api.current = { commit, cancel };
+  // From one entry to the list: write this entry first, then open a blank one under it.
+  const addAnother = () => {
+    explicit.current = true;
+    if (!validate()) return;
+    if (!item && !parseDuration(value())) { if (input.current) input.current.focus(); return; }
+    flushNote();
+    setListOpen(true);
+    setNewRow(true);
+    props.onCommit(value(), extra());
+  };
+  const addNew = (minutes, ex) => { setNewRow(false); return props.onAdd(issue, date, minutes, ex); };
+  const addButton = (onClick, disabled) => html`<button class="ed-add" ref=${addBtn} onClick=${onClick} disabled=${disabled}>
+    <${Icon} name="plus" size=${13} stroke=${2.2} /> Add another entry</button>`;
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -1084,7 +1526,10 @@ function CellEditor(props) {
       <div class="ed-list">
         ${entries.map((e) => html`<${ItemRow} key=${e.key} e=${e} types=${types} cancelled=${cancelled} register=${register}
           onPatch=${props.onPatch} onRemove=${props.onRemove} onRestore=${props.onRestore} />`)}
+        ${newRow ? html`<${NewItemRow} key="new" types=${types} defType=${defType} cancelled=${cancelled} register=${register}
+          onAdd=${addNew} onDiscard=${() => setNewRow(false)} />` : null}
       </div>
+      ${newRow ? null : addButton(() => setNewRow(true), false)}
       <div class="ed-foot">
         <span class="muted small">${plural(lv.length, 'work item', 'work items')} · ${fmt(cur)}</span>
         <span class="grow"></span>
@@ -1109,17 +1554,18 @@ function CellEditor(props) {
         </div>
         ${err ? html`<div class="err-line" role="alert">${err}</div>` : null}
         ${offered ? html`<div class="ed-hint"><${Icon} name="sparkle" size=${12} /> Suggested from ${suggestion.title}, ${suggestion.when}. Enter adds it.</div>` : null}
-        ${types.length ? html`<label class="ed-row"><span>Type</span>
-          <select value=${type} onChange=${(e) => {
-            typeTouched.current = true;
-            setType(e.target.value);
-            if (item) props.onPatch(item, { type: e.target.value || null });
-          }}>
-            ${item
-              ? html`<option value="">No type</option>`
-              : defType ? html`<option value="">${defType} (default)</option><option value="-">No type</option>` : html`<option value="">No type</option>`}
-            ${types.map((t) => html`<option value=${t}>${t}</option>`)}
-          </select></label>` : null}
+        ${types.length ? html`<div class="ed-row"><span id="ed-type-label">Type</span>
+          <${Select} shape="field" fill labelledBy="ed-type-label" value=${type}
+            options=${[
+              ...(item || !defType ? [{ value: '', label: 'No type' }] : [{ value: '', label: defType, meta: 'default' }, { value: '-', label: 'No type' }]),
+              ...types.map((t) => ({ value: t, label: t })),
+            ]}
+            onChange=${(v) => {
+              typeTouched.current = true;
+              setType(v);
+              if (item) props.onPatch(item, { type: v || null });
+            }} />
+        </div>` : null}
         <label class="ed-row"><span>Note</span>
           <input value=${note} placeholder="What did you do?" onInput=${(e) => setNote(e.target.value)}
             onKeyDown=${(e) => {
@@ -1130,6 +1576,7 @@ function CellEditor(props) {
             }}
             onBlur=${() => { if (!done.current) flushNote(); }} />
         </label>
+        ${addButton(addAnother, !item && !(parseDuration(text) > 0))}
         ${item && item.error ? html`<div class="err-line">Couldn't send: ${item.error}</div>` : null}
         <div class="ed-foot">
           <span class=${'ed-status s-' + (item ? item.status : 'new')}>${item ? STATUS_TEXT[item.status] : 'Enter to log · Tab for the next day'}</span>
@@ -1137,6 +1584,52 @@ function CellEditor(props) {
           ${item ? html`<button class="btn btn-sm btn-quiet danger" onClick=${() => { cancel(); props.onRemove(item); props.onClose(false); }}>Remove</button>` : null}
           <button class="btn btn-sm" onClick=${props.onTimer} disabled=${timerHere} title="Start a timer on this issue"><${Icon} name="play" size=${12} /> Timer</button>
         </div>`}
+  </div>`;
+}
+
+// A blank work item at the end of the cell's list. Enter adds it; closing the editor adds it too when
+// it holds a time; Escape or × drops it. Its type starts on the project's default, like a new cell.
+function NewItemRow({ types, defType, cancelled, register, onAdd, onDiscard }) {
+  const [t, setT] = useState('');
+  const [type, setType] = useState('');
+  const [note, setNote] = useState('');
+  const [bad, setBad] = useState(false);
+  const live = useRef({});
+  Object.assign(live.current, { t, type, note });
+  const input = useRef(null);
+  useLayoutEffect(() => { if (input.current) input.current.focus(); }, []);
+  const minutes = () => (live.current.t.trim() ? parseDuration(live.current.t) : 0);
+  const typeValue = () => {
+    const x = live.current;
+    if (!x.typeTouched) return undefined;
+    if (x.type === '-') return null;
+    if (x.type === '') return defType ? undefined : null;
+    return x.type;
+  };
+  const save = () => {
+    const x = live.current;
+    const m = minutes();
+    if (x.saved || cancelled.current || !m || m > 1440) return false;
+    x.saved = true;
+    onAdd(m, { type: typeValue(), text: x.note.trim() });
+    return true;
+  };
+  useEffect(() => register(save), []);
+  const enter = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const m = minutes();
+    if (!m || m > 1440) { setBad(true); if (input.current) input.current.focus(); return; }
+    save();
+  };
+  return html`<div class="item new">
+    <input ref=${input} class=${'item-t' + (bad ? ' bad' : '')} value=${t} placeholder="0h" aria-label="Time for the new work item" aria-invalid=${bad}
+      onInput=${(e) => { setBad(false); setT(e.target.value); }} onKeyDown=${enter} autocomplete="off" spellcheck=${false} />
+    ${types.length ? html`<${Select} shape="field" fill label="Type for the new work item" value=${type}
+      options=${[...(defType ? [{ value: '', label: defType, meta: 'default' }, { value: '-', label: 'No type' }] : [{ value: '', label: 'No type' }]), ...types.map((x) => ({ value: x, label: x }))]}
+      onChange=${(v) => { live.current.typeTouched = true; setType(v); }} />` : null}
+    <input class="item-note" value=${note} placeholder="Note" aria-label="Note for the new work item" onInput=${(e) => setNote(e.target.value)} onKeyDown=${enter} />
+    <button class="icon-btn" aria-label="Drop the new work item" onClick=${onDiscard}><${Icon} name="x" size=${12} stroke=${2.2} /></button>
   </div>`;
 }
 
@@ -1173,8 +1666,9 @@ function ItemRow({ e, types, cancelled, register, onPatch, onRemove, onRestore }
   }
   return html`<div class=${'item' + (e.error ? ' failed' : '')}>
     <input class="item-t" value=${t} aria-label="Time" onInput=${(ev) => setT(ev.target.value)} onBlur=${saveTime} onKeyDown=${(ev) => { if (ev.key === 'Enter') ev.target.blur(); }} />
-    ${types.length ? html`<select class="item-type" value=${e.type || ''} aria-label="Type" onChange=${(ev) => onPatch(e, { type: ev.target.value || null })}>
-      <option value="">No type</option>${types.map((x) => html`<option value=${x}>${x}</option>`)}</select>` : null}
+    ${types.length ? html`<${Select} shape="field" fill label="Type" value=${e.type || ''}
+      options=${[{ value: '', label: 'No type' }, ...types.map((x) => ({ value: x, label: x }))]}
+      onChange=${(v) => onPatch(e, { type: v || null })} />` : null}
     <input class="item-note" value=${note} placeholder="Note" aria-label="Note" onInput=${(ev) => setNote(ev.target.value)} onBlur=${saveNote} />
     <button class="icon-btn" aria-label="Remove this work item" onClick=${() => onRemove(e)}><${Icon} name="x" size=${12} stroke=${2.2} /></button>
     ${e.status !== 'synced' ? html`<i class=${'mark-dot' + (e.error ? ' err' : '')} title=${e.error || STATUS_TEXT[e.status]}></i>` : null}
@@ -1386,8 +1880,13 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect }
   const [rounding, setRounding] = useState(String(s.timerRounding));
   const [dayEnds, setDayEnds] = useState(s.dayEnds);
   const [defs, setDefs] = useState(Object.assign({}, s.typeDefaults));
+  const [theme, setTheme] = useState(readTheme);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // The theme shows as soon as it's picked; Cancel puts the old one back.
+  const themeBefore = useRef(theme);
+  const themeKept = useRef(false);
+  useEffect(() => () => { if (!themeKept.current) showTheme(themeBefore.current); }, []);
   const projectList = Object.values(week.projects).filter((p) => (p.types || []).length);
   for (const k of Object.keys(s.typeDefaults)) if (!week.projects[k]) projectList.push({ shortName: k, name: k, types: [s.typeDefaults[k]], unknown: true });
   const DAYS = [[1, 'M', 'Monday'], [2, 'T', 'Tuesday'], [3, 'W', 'Wednesday'], [4, 'T', 'Thursday'], [5, 'F', 'Friday'], [6, 'S', 'Saturday'], [0, 'S', 'Sunday']];
@@ -1398,6 +1897,8 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect }
     setErr('');
     try {
       await api('PUT', '/settings', { dailyTargetMinutes: mins, workDays, timerRounding: Number(rounding), dayEnds, typeDefaults: defs });
+      saveTheme(theme);
+      themeKept.current = true;
       onSaved();
     } catch (e) {
       setErr(e.message);
@@ -1416,25 +1917,32 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect }
         <div class="daypick" role="group" aria-label="Work days">${DAYS.map(([n, l, full]) => html`<button key=${n} type="button" class=${'daybtn' + (workDays.includes(n) ? ' on' : '')} aria-pressed=${workDays.includes(n)} aria-label=${full}
           onClick=${() => setWorkDays(workDays.includes(n) ? workDays.filter((x) => x !== n) : [...workDays, n])}>${l}</button>`)}</div>
       </div>
-      <label class="srow"><span>My day ends at</span><input id="s-end" type="time" class="in-sm" value=${dayEnds} onInput=${(e) => setDayEnds(e.target.value)} /></label>
-      <label class="srow"><span>Round timers to</span>
-        <select id="s-round" class="in-sm" value=${rounding} onChange=${(e) => setRounding(e.target.value)}>
-          ${['1', '5', '10', '15', '30'].map((v) => html`<option value=${v}>${v === '1' ? 'the minute' : v + ' min'}</option>`)}
-        </select></label>
+      <div class="srow"><span id="s-end-label">My day ends at</span>
+        <${Select} id="s-end" labelledBy="s-end-label" value=${dayEnds} minWidth=${120} align="end" onChange=${setDayEnds}
+          options=${(QUARTERS.includes(dayEnds) ? QUARTERS : [...QUARTERS, dayEnds].sort()).map((t) => ({ value: t, label: t }))} /></div>
+      <div class="srow"><span id="s-round-label">Round timers to</span>
+        <${Select} id="s-round" labelledBy="s-round-label" value=${rounding} minWidth=${120} align="end" onChange=${setRounding}
+          options=${['1', '5', '10', '15', '30'].map((v) => ({ value: v, label: v === '1' ? 'the minute' : v + ' min' }))} /></div>
     </div>
     <div class="group">
       <div class="group-title">Default work type</div>
-      ${projectList.length ? projectList.map((p) => html`<label class="srow" key=${p.shortName}>
-        <span><span class="mono">${p.shortName}</span>${p.name && p.name !== p.shortName ? html` <span class="muted small">${p.name}</span>` : null}</span>
-        <select id=${'t-' + p.shortName} class="in-md" value=${defs[p.shortName] || ''} onChange=${(e) => setDefs(Object.assign({}, defs, { [p.shortName]: e.target.value }))}>
-          <option value="">None</option>
-          ${(p.types || []).map((t) => html`<option value=${t}>${t}</option>`)}
-        </select>
-      </label>`) : html`<div class="srow muted small">Projects appear here once you've logged on them.</div>`}
+      ${projectList.length ? projectList.map((p) => html`<div class="srow" key=${p.shortName}>
+        <span id=${'t-' + p.shortName + '-label'}><span class="mono">${p.shortName}</span>${p.name && p.name !== p.shortName ? html` <span class="muted small">${p.name}</span>` : null}</span>
+        <${Select} id=${'t-' + p.shortName} labelledBy=${'t-' + p.shortName + '-label'} value=${defs[p.shortName] || ''} minWidth=${150} align="end"
+          options=${[{ value: '', label: 'None' }, ...(p.types || []).map((t) => ({ value: t, label: t }))]}
+          onChange=${(v) => setDefs(Object.assign({}, defs, { [p.shortName]: v }))} />
+      </div>`) : html`<div class="srow muted small">Projects appear here once you've logged on them.</div>`}
+    </div>
+    <div class="group">
+      <div class="group-title">Appearance</div>
+      <div class="srow"><span id="s-theme-label">Theme</span>
+        <${Select} id="s-theme" labelledBy="s-theme-label" value=${theme} minWidth=${120} align="end"
+          onChange=${(v) => { setTheme(v); showTheme(v); }}
+          options=${[{ value: 'system', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} /></div>
     </div>
     <div class="group">
       <div class="group-title">YouTrack</div>
-      <div class="srow"><span>${status.user ? status.user.fullName || status.user.login : 'Connected'}<span class="muted small block">${host}</span></span>
+      <div class="srow account"><span>${status.user ? status.user.fullName || status.user.login : 'Connected'}<span class="muted small block">${host}</span></span>
         <span class="srow-acts"><button class="btn btn-sm" onClick=${onReload}>Reload</button><button class="btn btn-sm" onClick=${onReconnect}>Change</button></span></div>
     </div>
     ${err ? html`<p class="form-error" role="alert">${err}</p>` : null}
