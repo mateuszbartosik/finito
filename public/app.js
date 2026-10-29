@@ -1036,7 +1036,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
             (r) => (r.added.length ? `Added ${r.added.join(', ')}` : 'Nothing new to copy') + (r.skipped.length ? ` · skipped ${r.skipped.join(', ')} (resolved)` : ''),
           ) : null}
         />
-        ${sugg.errors.length ? html`<p class="paper-note">Some suggestions are missing. ${sugg.errors.join(' · ')}</p>` : null}
+        ${sugg.errors.length ? html`<p class="paper-note">Some suggestions are missing. ${withLinks(sugg.errors.join(' · '))}</p>` : null}
       </section>
     </main>
 
@@ -1430,6 +1430,11 @@ function AddIssue({ onClose, onPick, exclude, compact = false, placeholder, minW
 
 // Links from GitHub become links only if they are web addresses.
 const webUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? u : null);
+
+// An error can name the page that fixes it (a token's settings on GitHub): make that a link.
+const withLinks = (text) => String(text).split(/(https:\/\/[^\s<>"]*[^\s<>".,;:)])/).map((part, i) => (i % 2
+  ? html`<a class="err-link" href=${part} target="_blank" rel="noopener noreferrer">${part.replace(/^https:\/\//, '').replace(/[?#].*$/, '')}</a>`
+  : part));
 
 // A suggestion that comes only from meetings, or only from reviews, says so.
 function suggIcon(s) {
@@ -2009,7 +2014,7 @@ const SOURCE_TEXT = {
     field: 'Personal access token',
     input: 'password',
     placeholder: 'github_pat_…',
-    help: html`In GitHub: <b>Settings</b> → <b>Developer settings</b> → <b>Personal access tokens</b>. Read access to pull requests is enough; a classic token needs the <b>repo</b> scope only for private repositories. It stays on this computer.`,
+    help: html`In GitHub: <b>Settings</b> → <b>Developer settings</b> → <b>Personal access tokens</b>. Read access to pull requests is enough; a classic token needs the <b>repo</b> scope only for private repositories. Give it an expiry date: organizations can refuse tokens that never expire. It stays on this computer.`,
   },
 };
 
@@ -2028,9 +2033,12 @@ function SourcesGroup({ onChanged }) {
     setBusy(true);
     setErr('');
     try {
-      setSrc(await api('POST', '/sources/' + kind, kind === 'calendar' ? { url: value } : { token: value }));
+      const next = await api('POST', '/sources/' + kind, kind === 'calendar' ? { url: value } : { token: value });
+      setSrc(next);
       setOpen(null);
       setValue('');
+      // Connected, but some repositories refuse the token: say which and why.
+      if (next.warning) setErr(next.warning);
       onChanged();
     } catch (e) {
       setErr(e.message);
@@ -2084,7 +2092,7 @@ function SourcesGroup({ onChanged }) {
         <button class="row-x" aria-label=${`Forget the choice for ${m.label}`} title="Forget" onClick=${() => forget(m)}><${Icon} name="x" size=${11} stroke=${2.2} /></button>
       </li>`)}</ul>
     </div>` : null}
-    ${err ? html`<p class="form-error src-error" role="alert">${err}</p>` : null}
+    ${err ? html`<p class="form-error src-error" role="alert">${withLinks(err)}</p>` : null}
   </div>`;
 }
 

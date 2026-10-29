@@ -13,7 +13,8 @@ const stamp = (ms) => {
 };
 const dayStamp = (date) => date.replace(/-/g, '');
 
-function createMockSources({ token = 'gh-token', login = 'sample-user', email = 'sample@example.com', monday = D.mondayOf(D.localDate()) } = {}) {
+// refuse: { 'owner' or 'owner/repo': { message, headers } } answers that repository's requests with a 403.
+function createMockSources({ token = 'gh-token', login = 'sample-user', email = 'sample@example.com', monday = D.mondayOf(D.localDate()), refuse = {} } = {}) {
   const day = (k) => D.addDays(monday, k);
   const at = (k, h, m) => D.localMidnightMs(day(k)) + (h * 60 + m) * 60000;
   const iso = (ms) => new Date(ms).toISOString();
@@ -85,6 +86,12 @@ function createMockSources({ token = 'gh-token', login = 'sample-user', email = 
           repository_url: `https://api.github.com/repos/${pr.repo}`, pull_request: { url: '' }, user: user(pr.author),
         })),
       });
+    }
+    const rm = /^\/repos\/([^/]+)\/([^/]+)\//.exec(g);
+    const rule = rm && (refuse[`${rm[1]}/${rm[2]}`] || refuse[rm[1]]);
+    if (rule) {
+      res.writeHead(403, Object.assign({ 'Content-Type': 'application/json', 'X-Accepted-GitHub-Permissions': 'pull_requests=read', 'X-RateLimit-Remaining': '4999' }, rule.headers || {}));
+      return res.end(JSON.stringify({ message: rule.message, documentation_url: 'https://docs.github.com/rest' }));
     }
     const find = (o, r, n) => pulls.find((x) => x.repo === `${o}/${r}` && x.number === Number(n));
     if ((m = /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/reviews$/.exec(g))) { const pr = find(m[1], m[2], m[3]); return pr ? json(res, 200, pr.reviews) : json(res, 404, {}); }

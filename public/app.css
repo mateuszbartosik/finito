@@ -923,6 +923,7 @@ kbd { font-family: var(--mono); }
 .howto ol { margin: 8px 0; padding-left: 18px; line-height: 1.65; }
 .howto a { display: inline-flex; align-items: center; gap: 4px; }
 .form-error { margin: 0; font-size: 13.5px; color: var(--danger); }
+.err-link { color: inherit; font-weight: 560; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 /* ---------- misc ---------- */

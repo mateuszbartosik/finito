@@ -48,7 +48,7 @@ Both connect in **Settings → Suggestions from**. Their address and token stay 
 
 A meeting counts when it's over, has someone besides you, and you didn't decline it. Time you block alone and events marked free count only when their title names an issue; all-day events never do. A meeting goes to the issue its title (or description) names. If it names none, it waits under **Not tied to an issue yet**: **Choose issue** sends it, and every meeting with the same title, to that issue from then on; × stops suggesting it. **Settings** lists these choices, and each can be forgotten.
 
-**GitHub reviews.** Make a token in GitHub → **Settings** → **Developer settings** → **Personal access tokens**: a fine-grained one with read access to pull requests, or a classic one (no scope for public repositories, **repo** for private ones). Your reviews, review comments and comments on pull requests you reviewed become suggestions for the issue the pull request names in its title, description or branch. One without an issue waits under **Not tied to an issue yet**, like a meeting.
+**GitHub reviews.** Make a token in GitHub → **Settings** → **Developer settings** → **Personal access tokens**: a fine-grained one with read access to pull requests, or a classic one (no scope for public repositories, **repo** for private ones). Give it an expiry date: organizations can refuse tokens that never expire, or that last longer than they allow. If GitHub refuses the token anywhere, Finito says why, in Settings when you connect and under the week, and still counts the rest. Your reviews, review comments and comments on pull requests you reviewed become suggestions for the issue the pull request names in its title, description or branch. One without an issue waits under **Not tied to an issue yet**, like a meeting.
 
 **How long.** A meeting counts as scheduled. A review counts from your first to your last comment, rounded up to 15 minutes. Where meetings, reviews and YouTrack activity overlap on an issue, the time counts once. Time from meetings goes in as the project's Meeting or Communication type, and reviews as Review, when the project has those types.
 
@@ -107,6 +107,7 @@ Both are in `.gitignore`, so they stay out of commits.
 | No suggestions | They need YouTrack's activity API (2020+). A note under the week shows the error if a request failed. |
 | No meetings | Copy the calendar's secret address again; resetting it in your calendar breaks the old one. Only meetings that are over count. |
 | "GitHub's hourly limit is used up" | GitHub limits requests per hour. Review suggestions come back within the hour. |
+| "The … organization accepts only tokens that expire within … days" | Regenerate the token in GitHub with an expiry date inside that limit, then connect the new one in Settings. |
 | Behind a proxy | Node doesn't use the system proxy. Set `NODE_USE_ENV_PROXY=1` and `HTTPS_PROXY` (Node 22.21 or newer). |
 
 ## Development

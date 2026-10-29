@@ -14,10 +14,10 @@ const D = require('../lib/dates');
 const monday = D.addDays(D.mondayOf(D.localDate()), -7);
 const day = (k) => D.addDays(monday, k);
 
-async function setup() {
+async function setup(sources = {}) {
   const yt = createMockYouTrack({ token: 'secret' });
   const ytUrl = await yt.start();
-  const src = createMockSources({ monday, email: yt.me.email });
+  const src = createMockSources(Object.assign({ monday, email: yt.me.email }, sources));
   const urls = await src.start();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finito-src-'));
   fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ youtrackUrl: ytUrl, token: 'secret' }));
@@ -140,6 +140,46 @@ test('a broken source is reported, not fatal', async () => {
     assert.match(r.body.errors[1], /^GitHub: /);
   } finally {
     t.src.stop = async () => {};
+    await t.done();
+  }
+});
+
+test("an organization's rules for tokens are explained when connecting and under the week", async () => {
+  const rules = {};
+  const t = await setup({ refuse: rules });
+  try {
+    let r = await t.call('POST', '/api/sources/github', { token: 'gh-token' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.warning, null);
+    // Later acme starts refusing tokens that last more than a year, the way some organizations do.
+    rules.acme = { message: "The 'acme' organization forbids access via a fine-grained personal access tokens if the token's lifetime is greater than 366 days. Please adjust your token's lifetime at the following URL: https://github.com/settings/personal-access-tokens/123" };
+    const why = 'The acme organization accepts only tokens that expire within 366 days. Regenerate the token with an expiry date at https://github.com/settings/personal-access-tokens/123, then connect the new one in Settings.';
+    await t.call('POST', '/api/refresh');
+    r = await t.call('GET', '/api/suggestions?start=' + monday);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.errors, ['GitHub: ' + why], 'one line for the organization, not one per pull request');
+    assert.equal(r.body.suggestions.some((s) => s.sources && s.sources.reviews), false);
+    // Connecting such a token again stops with the reason.
+    r = await t.call('POST', '/api/sources/github', { token: 'gh-token' });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error, why);
+  } finally {
+    await t.done();
+  }
+});
+
+test('a repository that refuses the token is skipped and the rest still counts', async () => {
+  const t = await setup({ refuse: { 'acme/api': { message: 'Resource not accessible by personal access token' } } });
+  try {
+    const why = "The token can't read acme/api. In GitHub, give it that repository and read access to pull requests, then reload.";
+    let r = await t.call('POST', '/api/sources/github', { token: 'gh-token' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.warning, why);
+    r = await t.call('GET', '/api/suggestions?start=' + monday);
+    assert.deepEqual(r.body.errors, ['GitHub: ' + why]);
+    assert.ok(r.body.suggestions.find((s) => s.issue === 'DS-41' && s.date === day(2)), 'the review in acme/web still counts');
+    assert.equal(r.body.unsorted.some((u) => u.key === 'pr:acme/api#7'), false);
+  } finally {
     await t.done();
   }
 });
