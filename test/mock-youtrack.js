@@ -1,6 +1,6 @@
 'use strict';
 
-// A small in-memory stand-in for YouTrack's REST API: just the endpoints Spent calls.
+// A small in-memory stand-in for YouTrack's REST API: just the endpoints Finito calls.
 // Used by the tests and by `npm run demo`.
 
 const http = require('http');

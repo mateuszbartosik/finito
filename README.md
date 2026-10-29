@@ -1,12 +1,14 @@
-# Spent
+# Finito
 
 A week-first timesheet for [YouTrack](https://www.jetbrains.com/youtrack/). Type your hours into a week, or log them in one line, and send them to YouTrack when the week looks right.
 
-Spent runs on your own computer. Nothing gets installed in YouTrack: Spent talks to it with your personal token, the same way you would.
+Finito runs on your own computer. Nothing gets installed in YouTrack: Finito talks to it with your personal token, the same way you would.
+
+The name is casual Polish for "finished", which is what the week is once it's in YouTrack.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/spent-dark.png">
-  <img src="docs/spent-light.png" alt="Spent: a week of time per issue with a meter in each day's header, a suggested entry drawn dashed, and a glass bar at the bottom holding a running timer.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/finito-dark.png">
+  <img src="docs/finito-light.png" alt="Finito: a week of time per issue with a meter in each day's header, a suggested entry drawn dashed, and a glass bar at the bottom holding a running timer.">
 </picture>
 
 ## What it does
@@ -22,18 +24,18 @@ Spent runs on your own computer. Nothing gets installed in YouTrack: Spent talks
 You need [Node.js](https://nodejs.org) 20 or newer (`node -v`). Nothing else: no `npm install`.
 
 ```sh
-git clone https://github.com/mateuszbartosik/spent.git
-cd spent
+git clone https://github.com/mateuszbartosik/finito.git
+cd finito
 npm start
 ```
 
-On Windows you can also double-click `start.cmd`. Spent opens <http://localhost:5178>. Keep its window open while you use it; Ctrl+C stops it.
+On Windows you can also double-click `start.cmd`. Finito opens <http://localhost:5178>. Keep its window open while you use it; Ctrl+C stops it.
 
 ## Connect YouTrack
 
 1. In YouTrack, open your avatar → **Profile** → **Account Security**.
-2. Under **Tokens**, choose **New token…**, name it "Spent", give it the **YouTrack** scope, and copy it.
-3. In Spent, enter your YouTrack's address (for example `https://yourcompany.youtrack.cloud`) and paste the token.
+2. Under **Tokens**, choose **New token…**, name it "Finito", give it the **YouTrack** scope, and copy it.
+3. In Finito, enter your YouTrack's address (for example `https://yourcompany.youtrack.cloud`) and paste the token.
 
 ## Try it without touching YouTrack
 
@@ -65,26 +67,26 @@ Daily target, work days, end of your day, timer rounding, light or dark theme, a
 
 ## Look
 
-Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the edges of the glass also bend what's behind them; other browsers get the frosted version. Spent follows your system's light or dark mode unless you pick one in Settings, and its Reduce transparency, Increase contrast and Reduce motion settings.
+Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the edges of the glass also bend what's behind them; other browsers get the frosted version. Finito follows your system's light or dark mode unless you pick one in Settings, and its Reduce transparency, Increase contrast and Reduce motion settings.
 
 ## Where your data lives
 
-- `data/config.json`: the YouTrack address and your token, in plain text. **Settings → Change** replaces them; deleting the file disconnects Spent. Keep the folder private, and revoke the token in YouTrack if this computer is ever lost.
+- `data/config.json`: the YouTrack address and your token, in plain text. **Settings → Change** replaces them; deleting the file disconnects Finito. Keep the folder private, and revoke the token in YouTrack if this computer is ever lost.
 - `data/state.json`: drafts, edits that aren't submitted yet, the running timer and your settings. Submitted time lives only in YouTrack.
 
 Both are in `.gitignore`, so they stay out of commits.
 
 ## Safety
 
-- Spent listens on 127.0.0.1 only. Its API refuses requests without its own header and checks the Host and Origin, so other web pages can't drive it.
-- The token never reaches the browser, and Spent won't follow a redirect from https to http with it.
+- Finito listens on 127.0.0.1 only. Its API refuses requests without its own header and checks the Host and Origin, so other web pages can't drive it.
+- The token never reaches the browser, and Finito won't follow a redirect from https to http with it.
 - It writes only your own work items. A create that times out is looked up before it's retried, so it can't land twice.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| "Port 5178 is already in use" | Spent is probably already running: open <http://localhost:5178>. Or set `SPENT_PORT=5180` before starting. |
+| "Port 5178 is already in use" | Finito is probably already running: open <http://localhost:5178>. Or set `FINITO_PORT=5180` before starting. |
 | "Couldn't reach …" | Check the address, and your VPN if YouTrack needs one. |
 | "YouTrack turned the token down" | Make a new permanent token with the YouTrack scope. |
 | No suggestions | They need YouTrack's activity API (2020+). A note under the week shows the error if a request failed. |
@@ -98,6 +100,6 @@ Both are in `.gitignore`, so they stay out of commits.
 
 ## License
 
-[MIT](LICENSE). Spent includes [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm) (MIT) and the [Geist](https://vercel.com/font) fonts (SIL Open Font License 1.1); their licenses sit next to them in `public/vendor/` and `public/fonts/`.
+[MIT](LICENSE). Finito includes [Preact](https://preactjs.com) (MIT), [htm](https://github.com/developit/htm) (Apache 2.0) and the [Geist](https://vercel.com/font) fonts (SIL Open Font License 1.1); their licenses sit next to them in `public/vendor/` and `public/fonts/`.
 
-Spent is not affiliated with JetBrains. YouTrack is a trademark of JetBrains s.r.o.
+Finito is not affiliated with JetBrains. YouTrack is a trademark of JetBrains s.r.o.

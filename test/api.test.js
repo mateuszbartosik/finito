@@ -12,14 +12,14 @@ const D = require('../lib/dates');
 async function setup() {
   const mock = createMockYouTrack({ token: 'secret' });
   const ytUrl = await mock.start();
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spent-test-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finito-test-'));
   const app = createApp({ port: 0, dataDir });
   const port = await app.start();
   const base = `http://127.0.0.1:${port}`;
   const call = async (method, p, body, headers = {}) => {
     const res = await fetch(base + p, {
       method,
-      headers: Object.assign({ 'x-spent': '1' }, body ? { 'Content-Type': 'application/json' } : {}, headers),
+      headers: Object.assign({ 'x-finito': '1' }, body ? { 'Content-Type': 'application/json' } : {}, headers),
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
@@ -41,7 +41,7 @@ test('normalizeUrl accepts what people paste', () => {
 test('guards: header, host and origin', async () => {
   const t = await setup();
   try {
-    let r = await t.call('GET', '/api/status', null, { 'x-spent': '' });
+    let r = await t.call('GET', '/api/status', null, { 'x-finito': '' });
     assert.equal(r.status, 403);
     r = await t.call('GET', '/api/status', null, { Origin: 'https://evil.example' });
     assert.equal(r.status, 403);
@@ -279,9 +279,9 @@ test('a rejected token surfaces as 401', async () => {
     await t.app.stop();
     const app2 = createApp({ port: 0, dataDir: t.dataDir });
     const port = await app2.start();
-    const res = await fetch(`http://127.0.0.1:${port}/api/week`, { headers: { 'x-spent': '1' } });
+    const res = await fetch(`http://127.0.0.1:${port}/api/week`, { headers: { 'x-finito': '1' } });
     assert.equal(res.status, 401);
-    const st = await (await fetch(`http://127.0.0.1:${port}/api/status`, { headers: { 'x-spent': '1' } })).json();
+    const st = await (await fetch(`http://127.0.0.1:${port}/api/status`, { headers: { 'x-finito': '1' } })).json();
     assert.equal(st.ytStatus, 401);
     await app2.stop();
     await t.mock.stop();

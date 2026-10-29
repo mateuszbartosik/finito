@@ -1,5 +1,5 @@
 {
-  "name": "spent",
+  "name": "finito",
   "version": "0.2.0",
   "private": true,
   "description": "A week-first timesheet for YouTrack that runs on your own computer.",
@@ -14,7 +14,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mateuszbartosik/spent.git"
+    "url": "git+https://github.com/mateuszbartosik/finito.git"
   },
   "license": "MIT"
 }

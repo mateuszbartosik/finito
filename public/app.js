@@ -50,11 +50,11 @@ async function api(method, path, body) {
   try {
     res = await fetch('/api' + path, {
       method,
-      headers: Object.assign({ 'X-Spent': '1' }, body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      headers: Object.assign({ 'X-Finito': '1' }, body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (_) {
-    const err = new Error("Spent's local server isn't answering. Is its window still open?");
+    const err = new Error("Finito's local server isn't answering. Is its window still open?");
     err.status = 0;
     throw err;
   }
@@ -472,7 +472,7 @@ function Setup({ status, canCancel, onCancel, onDone }) {
     <${Glass} as="form" class="setup glass-strong" radius=${30} bezel=${22} scale=${26} blur=${12} onSubmit=${submit}>
       <${Mark} size=${40} />
       <h1>Connect YouTrack</h1>
-      <p class="sub">Spent runs on this computer and logs time as you. Your token stays here.</p>
+      <p class="sub">Finito runs on this computer and logs time as you. Your token stays here.</p>
       <label class="field">
         <span>Address</span>
         <input id="url" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="https://youtrack.example.com" required />
@@ -485,7 +485,7 @@ function Setup({ status, canCancel, onCancel, onDone }) {
         <summary>Where do I get a token?</summary>
         <ol>
           <li>In YouTrack: your avatar → <b>Profile</b> → <b>Account Security</b>.</li>
-          <li><b>New token…</b>, name it “Spent”, scope <b>YouTrack</b>.</li>
+          <li><b>New token…</b>, name it “Finito”, scope <b>YouTrack</b>.</li>
           <li>Copy it now (YouTrack shows it once) and paste it here.</li>
         </ol>
         ${origin ? html`<a href=${origin + '/users/me'} target="_blank" rel="noopener noreferrer">Open my YouTrack profile <${Icon} name="external" size=${12} /></a>` : null}
