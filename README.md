@@ -15,7 +15,7 @@ The name is casual Polish for "finished", which is what the week is once it's in
 
 - **One line to log.** `APP-1207 1h30 review copy` in the bar at the bottom, Enter. Leave the time out and Enter starts a timer instead.
 - **A week you can type into.** Click a cell, or focus it and type a number. Totals per day fill a small meter toward your daily target; short days turn amber.
-- **Suggestions from your activity.** Your comments, field changes, attachments and commits in YouTrack, your meetings and your pull request reviews show up as dashed values: in the week for issues already there, and in a panel under it for the rest. Click one to add it, use **Add all**, or dismiss the ones you don't need.
+- **Suggestions from your activity.** Your comments, field changes, attachments and commits in YouTrack, your meetings and your pull request reviews show up as dashed values: in the week for issues already there, and in a panel under it for the rest. Only a day with no time on that issue yet gets one. Click one to add it, use **Add all**, or dismiss the ones you don't need.
 - **Nothing reaches YouTrack until you submit.** Submit appears when there's something to send. It checks first, writes each change, and retries a network failure without creating duplicates.
 - **Undo** on every log, from the toast.
 
@@ -48,9 +48,9 @@ Both connect in **Settings → Suggestions from**. Their address and token stay 
 
 A meeting counts when it's over, has someone besides you, and you didn't decline it. Time you block alone and events marked free count only when their title names an issue; all-day events never do. A meeting goes to the issue its title (or description) names. If it names none, it waits under **Not tied to an issue yet**: **Choose issue** sends it, and every meeting with the same title, to that issue from then on; × stops suggesting it. **Settings** lists these choices, and each can be forgotten.
 
-**GitHub reviews.** Make a token in GitHub → **Settings** → **Developer settings** → **Personal access tokens**: a fine-grained one with read access to pull requests, or a classic one (no scope for public repositories, **repo** for private ones). Give it an expiry date: organizations can refuse tokens that never expire, or that last longer than they allow. If GitHub refuses the token anywhere, Finito says why, in Settings when you connect and under the week, and still counts the rest. Your reviews, review comments and comments on pull requests you reviewed become suggestions for the issue the pull request names in its title, description or branch. One without an issue waits under **Not tied to an issue yet**, like a meeting.
+**GitHub reviews.** Make a token in GitHub → **Settings** → **Developer settings** → **Personal access tokens**: a fine-grained one with read access to pull requests, or a classic one (no scope for public repositories, **repo** for private ones). Give it an expiry date: organizations can refuse tokens that never expire, or that last longer than they allow. If GitHub refuses the token anywhere, Finito says why, in Settings when you connect and under the week, and still counts the rest. Your reviews and comments on pull requests, other people's and your own, become suggestions for the issue the pull request names in its title, description or branch. One without an issue waits under **Not tied to an issue yet**, like a meeting.
 
-**How long.** A meeting counts as scheduled. A review counts from your first to your last comment, rounded up to 15 minutes. Where meetings, reviews and YouTrack activity overlap on an issue, the time counts once. Time from meetings goes in as the project's Meeting or Communication type, and reviews as Review, when the project has those types.
+**How long.** A meeting counts as scheduled. A review counts from your first to your last comment, rounded up to 15 minutes. Where meetings, reviews and YouTrack activity overlap on an issue, the time counts once. Time from meetings goes in as the project's Meeting or Communication type, and reviews of other people's pull requests as Review, when the project has those types.
 
 ## Try it without touching YouTrack
 
@@ -104,7 +104,7 @@ Both are in `.gitignore`, so they stay out of commits.
 | "Port 5178 is already in use" | Finito is probably already running: open <http://localhost:5178>. Or set `FINITO_PORT=5180` before starting. |
 | "Couldn't reach …" | Check the address, and your VPN if YouTrack needs one. |
 | "YouTrack turned the token down" | Make a new permanent token with the YouTrack scope. |
-| No suggestions | They need YouTrack's activity API (2020+). A note under the week shows the error if a request failed. |
+| No suggestions | A day that already has time on an issue gets no suggestion for it. Suggestions need YouTrack's activity API (2020+); a note under the week shows the error if a request failed. |
 | No meetings | Copy the calendar's secret address again; resetting it in your calendar breaks the old one. Only meetings that are over count. |
 | "GitHub's hourly limit is used up" | GitHub limits requests per hour. Review suggestions come back within the hour. |
 | "The … organization accepts only tokens that expire within … days" | Regenerate the token in GitHub with an expiry date inside that limit, then connect the new one in Settings. |
@@ -113,7 +113,7 @@ Both are in `.gitignore`, so they stay out of commits.
 ## Development
 
 - `npm test` runs the parser, calendar, suggestion and API tests against a fake YouTrack (`test/mock-youtrack.js`) and a fake calendar and GitHub (`test/mock-sources.js`). No install needed. CI runs them on Node 20, 22 and 24, and on Windows.
-- `server.js` starts `lib/app.js` (routes, storage, submit, timer, suggestions). `lib/youtrack.js` is the REST client, `lib/ics.js` reads calendars (recurring events and time zones included) and `lib/github.js` reads your reviews.
+- `server.js` starts `lib/app.js` (routes, storage, submit, timer, suggestions). `lib/youtrack.js` is the REST client, `lib/ics.js` reads calendars (recurring events and time zones included) and `lib/github.js` reads your reviews and comments.
 - The UI is `public/app.js` (Preact + htm, vendored in `public/vendor/`, no build step). `public/glass.js` draws the refraction.
 
 ## License

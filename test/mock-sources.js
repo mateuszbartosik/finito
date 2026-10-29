@@ -55,6 +55,27 @@ function createMockSources({ token = 'gh-token', login = 'sample-user', email = 
       comments: [{ user: user(login), created_at: iso(at(3, 13, 50)), html_url: 'https://github.example.com/acme/api/pull/7#discussion_r3' }],
       talk: [{ user: user(login), created_at: iso(at(3, 14, 5)), html_url: 'https://github.example.com/acme/api/pull/7#issuecomment-1' }],
     },
+    {
+      // My own pull request: each reply to a reviewer arrives as a review of its own around one comment.
+      repo: 'acme/web', number: 45, title: 'APP-1215: empty state for invoices', body: '', branch: 'app-1215-empty-state', author: login,
+      reviews: [
+        { id: 451, user: user('alex'), state: 'CHANGES_REQUESTED', body: 'A few things.', submitted_at: iso(at(4, 10, 30)), html_url: 'https://github.example.com/acme/web/pull/45#pullrequestreview-451' },
+        { id: 452, user: user(login), state: 'COMMENTED', body: '', submitted_at: iso(at(4, 11, 0)), html_url: 'https://github.example.com/acme/web/pull/45#pullrequestreview-452' },
+        { id: 453, user: user(login), state: 'COMMENTED', body: '', submitted_at: iso(at(4, 11, 5)), html_url: 'https://github.example.com/acme/web/pull/45#pullrequestreview-453' },
+      ],
+      comments: [
+        { pull_request_review_id: 452, user: user(login), created_at: iso(at(4, 11, 0)), html_url: 'https://github.example.com/acme/web/pull/45#discussion_r4' },
+        { pull_request_review_id: 453, user: user(login), created_at: iso(at(4, 11, 5)), html_url: 'https://github.example.com/acme/web/pull/45#discussion_r5' },
+      ],
+      talk: [],
+    },
+    {
+      // Someone else's pull request that I only commented on, without reviewing.
+      repo: 'acme/docs', number: 9, title: 'Release notes for APP-1221', body: '', branch: 'notes', author: 'sam',
+      reviews: [],
+      comments: [],
+      talk: [{ user: user(login), created_at: iso(at(3, 16, 0)), html_url: 'https://github.example.com/acme/docs/pull/9#issuecomment-2' }],
+    },
   ];
   const state = { calls: [] };
 
@@ -77,11 +98,14 @@ function createMockSources({ token = 'gh-token', login = 'sample-user', email = 
     let m;
     if (g === '/user') return json(res, 200, { login, name: 'Sample User' });
     if (g === '/search/issues') {
+      // reviewed-by: finds pull requests with a review of mine, involves: my own and ones I commented on.
       const q = url.searchParams.get('q') || '';
-      if (!q.includes('reviewed-by:' + login)) return json(res, 200, { total_count: 0, items: [] });
+      const mine = (list) => list.some((x) => x.user.login === login);
+      const found = q.includes('reviewed-by:' + login) ? pulls.filter((pr) => mine(pr.reviews))
+        : q.includes('involves:' + login) ? pulls.filter((pr) => pr.author === login || mine(pr.talk) || mine(pr.comments)) : [];
       return json(res, 200, {
-        total_count: pulls.length,
-        items: pulls.map((pr) => ({
+        total_count: found.length,
+        items: found.map((pr) => ({
           number: pr.number, title: pr.title, body: pr.body, html_url: `https://github.example.com/${pr.repo}/pull/${pr.number}`,
           repository_url: `https://api.github.com/repos/${pr.repo}`, pull_request: { url: '' }, user: user(pr.author),
         })),

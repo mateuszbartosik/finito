@@ -80,3 +80,23 @@ test('separate sources on one day stay separate spans', () => {
   assert.equal(s.minutes, 90);
   assert.equal(s.when, '10:05–10:40, 15:30–16:05');
 });
+
+test('a comment wrapped in a review of its own counts once, and replies on my own pull request are comments', () => {
+  const issue = { idReadable: 'APP-1', summary: 'Something', project: { shortName: 'APP' } };
+  const ref = { label: 'acme/web#50', url: 'https://github.example.com/acme/web/pull/50', title: 'APP-1: something' };
+  const at = (h, m) => new Date(2026, 9, 28, h, m).getTime();
+  const points = [
+    { issue, at: at(10, 0), kind: 'review', quiet: true, ref },
+    { issue, at: at(10, 0), kind: 'review-comment', ref },
+    { issue, at: at(10, 20), kind: 'review', quiet: true, ref },
+    { issue, at: at(10, 20), kind: 'review-comment', ref },
+  ];
+  const [theirs] = buildSuggestions([], { dates: ['2026-10-28'], points });
+  assert.equal(theirs.title, '2 comments on web#50');
+  assert.equal(theirs.minutes, 30);
+  assert.equal(theirs.typeHint[0], 'Review');
+  const mine = points.map((p) => Object.assign({}, p, { ref: Object.assign({}, ref, { own: true }) }));
+  const [own] = buildSuggestions([], { dates: ['2026-10-28'], points: mine });
+  assert.equal(own.title, '2 comments on your pull request web#50');
+  assert.equal(own.typeHint, null);
+});

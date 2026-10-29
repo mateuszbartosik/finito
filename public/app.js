@@ -2010,7 +2010,7 @@ const SOURCE_TEXT = {
   },
   github: {
     name: 'GitHub reviews',
-    off: 'Pull requests you review',
+    off: 'Pull requests you review or comment on',
     field: 'Personal access token',
     input: 'password',
     placeholder: 'github_pat_…',

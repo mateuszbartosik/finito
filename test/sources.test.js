@@ -77,6 +77,17 @@ test('calendar and GitHub: connect, suggest, sort, ignore, undo', async () => {
     assert.equal(ds.when, '10:05–10:40');
     assert.equal(ds.refs[0].url, 'https://github.example.com/acme/web/pull/42');
     assert.equal(ds.typeHint[0], 'Review');
+    // Replies on my own pull request: comments, not reviews, and no Review type.
+    const own = sugg('APP-1215', day(4));
+    assert.ok(own, JSON.stringify(r.body.suggestions));
+    assert.equal(own.title, '2 comments on your pull request web#45');
+    assert.equal(own.minutes, 15);
+    assert.equal(own.typeHint, null);
+    // A pull request I only commented on is found too.
+    const notes = sugg('APP-1221', day(3));
+    assert.ok(notes, JSON.stringify(r.body.suggestions));
+    assert.equal(notes.title, 'a comment on docs#9');
+    assert.equal(notes.typeHint[0], 'Review');
     // The rest needs an issue: the standup, the 1:1 and a pull request with no issue in it.
     const rows = Object.fromEntries(r.body.unsorted.map((u) => [u.key, u]));
     assert.deepEqual(Object.keys(rows).sort(), ['meeting:1:1 with sam', 'meeting:daily standup', 'pr:acme/api#7']);
