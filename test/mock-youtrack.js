@@ -179,6 +179,10 @@ function createMockYouTrack({ token = 'test-token', today = D.localDate() } = {}
       }
     }
 
+    if (req.method === 'GET' && p === '/api/admin/projects') {
+      return json(res, 200, Object.values(projects).map((pr) => ({ id: pr.id, shortName: pr.shortName, name: pr.name })));
+    }
+
     if ((m = p.match(/^\/api\/admin\/projects\/([^/]+)\/timeTrackingSettings$/)) && req.method === 'GET') {
       const pr = projects[decodeURIComponent(m[1])];
       if (!pr) return notFound(res, m[1]);

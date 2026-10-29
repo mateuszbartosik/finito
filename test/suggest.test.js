@@ -34,3 +34,49 @@ test('groups by issue and day, skips logged and dismissed', () => {
   assert.equal(s.title, 'moved to In Progress, 2 comments');
   assert.equal(s.when, '11:40–14:10');
 });
+
+test('reviews and meetings join the same issue-day; overlaps count once', () => {
+  const pr = { label: 'acme/web#42', url: 'https://github.com/acme/web/pull/42', title: 'A-1: empty state' };
+  const out = buildSuggestions([
+    { id: '1', timestamp: at(10, 0), category: { id: 'CommentsCategory' }, target: { id: 'c1', issue: issue('A-1', 'One') } },
+  ], {
+    dates: [day],
+    points: [
+      { issue: issue('A-1', 'One'), at: at(10, 5), kind: 'review-comment', ref: pr },
+      { issue: issue('A-1', 'One'), at: at(10, 40), kind: 'review', ref: pr },
+      { issue: issue('B-2', 'Two'), at: at(16, 0), kind: 'review', ref: { label: 'acme/web#43', url: 'u', title: 'B-2' } },
+    ],
+    blocks: [
+      { issue: issue('A-1', 'One'), start: at(10, 30), end: at(11, 0), title: 'Design review' },
+      { issue: issue('C-3', 'Three'), start: at(13, 0), end: at(13, 25), title: 'Planning' },
+    ],
+  });
+  const by = Object.fromEntries(out.map((s) => [s.issue, s]));
+  // 10:00–10:15 (one comment), 10:05–10:50 (the review, rounded up), 10:30–11:00 (the meeting): 60 minutes once merged.
+  assert.equal(by['A-1'].minutes, 60);
+  assert.equal(by['A-1'].title, '1 comment, a review and a comment on web#42, meeting: Design review');
+  assert.equal(by['A-1'].when, '10:00, 10:05–10:40, 10:30–11:00');
+  assert.equal(by['A-1'].typeHint[0], 'Review');
+  assert.deepEqual(by['A-1'].sources, { activity: 1, reviews: 2, meetings: 1 });
+  assert.equal(by['B-2'].minutes, 15);
+  assert.equal(by['B-2'].title, 'a review on web#43');
+  // Meetings only: as scheduled, rounded up to 15 minutes, and not an estimate.
+  assert.equal(by['C-3'].minutes, 30);
+  assert.equal(by['C-3'].estimate, false);
+  assert.equal(by['C-3'].typeHint[0], 'Meeting');
+  assert.equal(by['C-3'].when, '13:00–13:25');
+});
+
+test('separate sources on one day stay separate spans', () => {
+  const pr = { label: 'acme/web#42', url: 'u', title: 'A-1' };
+  const [s] = buildSuggestions([
+    { id: '1', timestamp: at(15, 30), category: { id: 'CommentsCategory' }, target: { id: 'c1', issue: issue('A-1', 'One') } },
+    { id: '2', timestamp: at(16, 5), category: { id: 'CommentsCategory' }, target: { id: 'c2', issue: issue('A-1', 'One') } },
+  ], { dates: [day], points: [
+    { issue: issue('A-1', 'One'), at: at(10, 5), kind: 'review-comment', ref: pr },
+    { issue: issue('A-1', 'One'), at: at(10, 40), kind: 'review', ref: pr },
+  ] });
+  // 45 minutes of comments in the afternoon and 45 of review in the morning, not 10:05 to 16:05.
+  assert.equal(s.minutes, 90);
+  assert.equal(s.when, '10:05–10:40, 15:30–16:05');
+});

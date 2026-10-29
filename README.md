@@ -15,7 +15,7 @@ The name is casual Polish for "finished", which is what the week is once it's in
 
 - **One line to log.** `APP-1207 1h30 review copy` in the bar at the bottom, Enter. Leave the time out and Enter starts a timer instead.
 - **A week you can type into.** Click a cell, or focus it and type a number. Totals per day fill a small meter toward your daily target; short days turn amber.
-- **Suggestions from your activity.** Your comments, field changes, attachments and commits in YouTrack show up as dashed values: in the week for issues already there, and in a panel under it for the rest. Click one to add it, use **Add all**, or dismiss the ones you don't need.
+- **Suggestions from your activity.** Your comments, field changes, attachments and commits in YouTrack, your meetings and your pull request reviews show up as dashed values: in the week for issues already there, and in a panel under it for the rest. Click one to add it, use **Add all**, or dismiss the ones you don't need.
 - **Nothing reaches YouTrack until you submit.** Submit appears when there's something to send. It checks first, writes each change, and retries a network failure without creating duplicates.
 - **Undo** on every log, from the toast.
 
@@ -37,9 +37,24 @@ On Windows you can also double-click `start.cmd`. Finito opens <http://localhost
 2. Under **Tokens**, choose **New token…**, name it "Finito", give it the **YouTrack** scope, and copy it.
 3. In Finito, enter your YouTrack's address (for example `https://yourcompany.youtrack.cloud`) and paste the token.
 
+## Calendar and GitHub (optional)
+
+Both connect in **Settings → Suggestions from**. Their address and token stay on this computer.
+
+**Calendar.** Paste your calendar's secret address in iCal format:
+
+- Google Calendar: **Settings** → your calendar → **Integrate calendar** → **Secret address in iCal format**. If it's missing, your Workspace admin may have turned it off.
+- Outlook: **Settings** → **Calendar** → **Shared calendars** → **Publish a calendar** → the ICS link.
+
+A meeting counts when it's over, has someone besides you, and you didn't decline it. Time you block alone and events marked free count only when their title names an issue; all-day events never do. A meeting goes to the issue its title (or description) names. If it names none, it waits under **Not tied to an issue yet**: **Choose issue** sends it, and every meeting with the same title, to that issue from then on; × stops suggesting it. **Settings** lists these choices, and each can be forgotten.
+
+**GitHub reviews.** Make a token in GitHub → **Settings** → **Developer settings** → **Personal access tokens**: a fine-grained one with read access to pull requests, or a classic one (no scope for public repositories, **repo** for private ones). Your reviews, review comments and comments on pull requests you reviewed become suggestions for the issue the pull request names in its title, description or branch. One without an issue waits under **Not tied to an issue yet**, like a meeting.
+
+**How long.** A meeting counts as scheduled. A review counts from your first to your last comment, rounded up to 15 minutes. Where meetings, reviews and YouTrack activity overlap on an issue, the time counts once. Time from meetings goes in as the project's Meeting or Communication type, and reviews as Review, when the project has those types.
+
 ## Try it without touching YouTrack
 
-`npm run demo` (or double-click `demo.cmd`) opens <http://localhost:5179> against a fake YouTrack with sample data. It starts fresh every time.
+`npm run demo` (or double-click `demo.cmd`) opens <http://localhost:5179> against a fake YouTrack, calendar and GitHub with sample data. It starts fresh every time.
 
 ## The bar
 
@@ -71,15 +86,15 @@ Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the
 
 ## Where your data lives
 
-- `data/config.json`: the YouTrack address and your token, in plain text. **Settings → Change** replaces them; deleting the file disconnects Finito. Keep the folder private, and revoke the token in YouTrack if this computer is ever lost.
-- `data/state.json`: drafts, edits that aren't submitted yet, the running timer and your settings. Submitted time lives only in YouTrack.
+- `data/config.json`: the YouTrack address and your token, and, if you connected them, your calendar's secret address and your GitHub token, all in plain text. **Settings → Change** replaces the YouTrack ones and **Remove** clears the others; deleting the file disconnects Finito. Keep the folder private, and revoke the tokens (and reset the calendar's secret address) if this computer is ever lost.
+- `data/state.json`: drafts, edits that aren't submitted yet, the running timer, your settings, and which issue each meeting or pull request goes to. Submitted time lives only in YouTrack.
 
 Both are in `.gitignore`, so they stay out of commits.
 
 ## Safety
 
 - Finito listens on 127.0.0.1 only. Its API refuses requests without its own header and checks the Host and Origin, so other web pages can't drive it.
-- The token never reaches the browser, and Finito won't follow a redirect from https to http with it.
+- The tokens and the calendar's address never reach the browser, and Finito won't follow a redirect from https to http with the YouTrack token.
 - It writes only your own work items. A create that times out is looked up before it's retried, so it can't land twice.
 
 ## Troubleshooting
@@ -90,12 +105,14 @@ Both are in `.gitignore`, so they stay out of commits.
 | "Couldn't reach …" | Check the address, and your VPN if YouTrack needs one. |
 | "YouTrack turned the token down" | Make a new permanent token with the YouTrack scope. |
 | No suggestions | They need YouTrack's activity API (2020+). A note under the week shows the error if a request failed. |
+| No meetings | Copy the calendar's secret address again; resetting it in your calendar breaks the old one. Only meetings that are over count. |
+| "GitHub's hourly limit is used up" | GitHub limits requests per hour. Review suggestions come back within the hour. |
 | Behind a proxy | Node doesn't use the system proxy. Set `NODE_USE_ENV_PROXY=1` and `HTTPS_PROXY` (Node 22.21 or newer). |
 
 ## Development
 
-- `npm test` runs the parser, suggestion and API tests against a fake YouTrack (`test/mock-youtrack.js`). No install needed. CI runs them on Node 20, 22 and 24, and on Windows.
-- `server.js` starts `lib/app.js` (routes, storage, submit, timer, suggestions). `lib/youtrack.js` is the REST client.
+- `npm test` runs the parser, calendar, suggestion and API tests against a fake YouTrack (`test/mock-youtrack.js`) and a fake calendar and GitHub (`test/mock-sources.js`). No install needed. CI runs them on Node 20, 22 and 24, and on Windows.
+- `server.js` starts `lib/app.js` (routes, storage, submit, timer, suggestions). `lib/youtrack.js` is the REST client, `lib/ics.js` reads calendars (recurring events and time zones included) and `lib/github.js` reads your reviews.
 - The UI is `public/app.js` (Preact + htm, vendored in `public/vendor/`, no build step). `public/glass.js` draws the refraction.
 
 ## License

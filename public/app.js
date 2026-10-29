@@ -108,6 +108,8 @@ const ICONS = {
   warn: '<path d="M12 4.5L2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2h.01"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   chevron: '<path d="M6.5 9.5L12 15l5.5-5.5"/>',
+  calendar: '<rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+  review: '<circle cx="6.5" cy="6" r="2.2"/><circle cx="6.5" cy="18" r="2.2"/><circle cx="17.5" cy="18" r="2.2"/><path d="M6.5 8.2v7.6M17.5 15.8V10a3 3 0 0 0-3-3h-4.5M12 4.5L9.5 7l2.5 2.5"/>',
 };
 
 function Icon({ name, size = 16, stroke = 2 }) {
@@ -182,7 +184,8 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
     const t = trig.current;
     if (fill || !t) return;
     const cs = getComputedStyle(t);
-    const m = t.querySelector('.sel-measure').getBoundingClientRect().width;
+    // offsetWidth, not getBoundingClientRect: a sheet still rising (scaled) would measure short and clip the label.
+    const m = t.querySelector('.sel-measure').offsetWidth + 1;
     t.style.width = Math.max(minWidth, Math.ceil(m + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight))) + 'px';
   }, [cur.label, minWidth, fill]);
 
@@ -505,7 +508,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
   const [week, setWeek] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [mine, setMine] = useState([]);
-  const [sugg, setSugg] = useState({ loading: true, items: [], errors: [], monday: null });
+  const [sugg, setSugg] = useState({ loading: true, items: [], unsorted: [], errors: [], monday: null });
   const [edit, setEdit] = useState(null);
   const [timerPop, setTimerPop] = useState(false);
   const [toast, setToast] = useState(null);
@@ -556,9 +559,9 @@ function Main({ status, onReconnect, onUnauthorized }) {
     setSugg((s) => ({ ...s, loading: true, monday: start }));
     try {
       const r = await api('GET', `/suggestions?start=${start}`);
-      if (n === suggSeq.current) setSugg({ loading: false, items: r.suggestions || [], errors: r.errors || [], monday: start });
+      if (n === suggSeq.current) setSugg({ loading: false, items: r.suggestions || [], unsorted: r.unsorted || [], errors: r.errors || [], monday: start });
     } catch (e) {
-      if (n === suggSeq.current) setSugg({ loading: false, items: [], errors: [e.message], monday: start });
+      if (n === suggSeq.current) setSugg({ loading: false, items: [], unsorted: [], errors: [e.message], monday: start });
     }
   }, []);
 
@@ -660,6 +663,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
   const thisMonday = mondayOf(today);
   const isThisWeek = week.monday === thisMonday;
   const suggestions = sugg.monday === week.monday ? sugg.items.filter((s) => dates.includes(s.date)) : [];
+  const unsorted = sugg.monday === week.monday ? (sugg.unsorted || []).filter((u) => dates.some((d) => u.cells[d])) : [];
 
   const rowIds = [];
   const pushRow = (id) => { if (id && !rowIds.includes(id)) rowIds.push(id); };
@@ -829,7 +833,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
     const r = await serial(() => run(async () => {
       const keys = [];
       for (const s of list) {
-        const res = await api('POST', '/entries', { issue: s.issue, dates: [s.date], minutes: s.minutes });
+        const res = await api('POST', '/entries', { issue: s.issue, dates: [s.date], minutes: s.minutes, typeHint: s.typeHint || undefined });
         keys.push(...(res.keys || []));
       }
       return keys;
@@ -851,6 +855,46 @@ function Main({ status, onReconnect, onUnauthorized }) {
     } });
   };
   const dismissSuggestion = (s) => dismissSuggestions([s]);
+
+  // Meetings and reviews without an issue: choose one (remembered from then on), or ignore them.
+  const forgetUnsorted = (key, date) => setSugg((st) => ({
+    ...st,
+    unsorted: st.unsorted
+      .map((u) => (u.key !== key ? u : date ? { ...u, cells: Object.fromEntries(Object.entries(u.cells).filter(([d]) => d !== date)) } : null))
+      .filter((u) => u && Object.keys(u.cells).length),
+  }));
+  const unmapLater = (key) => async () => {
+    setToast(null);
+    try { await api('POST', '/suggestions/unmap', { key }); } catch (e) { flash(e.message, 'error'); return; }
+    if (weekRef.current) loadSugg(weekRef.current.monday);
+  };
+  const mapRow = async (u, issue) => {
+    forgetUnsorted(u.key);
+    try {
+      await api('POST', '/suggestions/map', { key: u.key, issue: issue.idReadable, label: u.label });
+    } catch (e) {
+      flash(e.message, 'error');
+      if (weekRef.current) loadSugg(weekRef.current.monday);
+      return;
+    }
+    if (weekRef.current) loadSugg(weekRef.current.monday);
+    flash(`${u.kind === 'meeting' ? `“${u.label}”` : u.sub} goes to ${issue.idReadable} from now on`, 'info', { label: 'Undo', fn: unmapLater(u.key) });
+  };
+  const ignoreRow = (u) => {
+    forgetUnsorted(u.key);
+    api('POST', '/suggestions/map', { key: u.key, ignore: true, label: u.label }).catch(() => {});
+    flash(`${u.kind === 'meeting' ? `“${u.label}”` : u.sub} won't be suggested again`, 'info', { label: 'Undo', fn: unmapLater(u.key) });
+  };
+  const dismissCell = (u, date) => {
+    const id = u.key + '|' + date;
+    forgetUnsorted(u.key, date);
+    api('POST', '/suggestions/dismiss', { ids: [id] }).catch(() => {});
+    flash(`Dismissed ${fmt(u.cells[date].minutes)} of ${u.kind === 'meeting' ? `“${u.label}”` : u.sub}`, 'info', { label: 'Undo', fn: async () => {
+      setToast(null);
+      try { await api('POST', '/suggestions/restore', { ids: [id] }); } catch (e) { flash(e.message, 'error'); return; }
+      if (weekRef.current) loadSugg(weekRef.current.monday);
+    } });
+  };
 
   // ---- dock: one line in, one action out ----
   const parsed = parseQuick(q, { dates, today, issues: known });
@@ -981,6 +1025,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
           onOpen=${openEditor}
           onAccept=${acceptSuggestions} onDismiss=${dismissSuggestion}
           onDismissIssue=${(id) => dismissSuggestions(suggestions.filter((x) => x.issue === id))}
+          unsorted=${unsorted} onMap=${mapRow} onIgnore=${ignoreRow} onDismissCell=${dismissCell}
           onTimer=${(id) => (timer && timer.issue === id ? stopTimer({}) : startTimer(id))}
           onRemoveRow=${(id) => run(() => api('POST', '/rows', { monday: week.monday, action: 'remove', issue: id }))}
           adding=${adding} setAdding=${setAdding}
@@ -990,7 +1035,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
             (r) => (r.added.length ? `Added ${r.added.join(', ')}` : 'Nothing new to copy') + (r.skipped.length ? ` · skipped ${r.skipped.join(', ')} (resolved)` : ''),
           ) : null}
         />
-        ${sugg.errors.length ? html`<p class="paper-note">Couldn't read all of your YouTrack activity: ${sugg.errors[0]}</p>` : null}
+        ${sugg.errors.length ? html`<p class="paper-note">Some suggestions are missing. ${sugg.errors.join(' · ')}</p>` : null}
       </section>
     </main>
 
@@ -1045,6 +1090,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
       onSaved=${() => { setSheet(null); reload(); flash('Settings saved'); }}
       onReload=${async () => { setSheet(null); await api('POST', '/refresh').catch(() => {}); await load(week.monday, true); loadSugg(week.monday); flash('Reloaded from YouTrack'); }}
       onReconnect=${() => { setSheet(null); onReconnect(); }}
+      onSources=${() => loadSugg(week.monday)}
     />` : null}
     ${toast ? html`<div class="toast-wrap" key=${toast.id}>
       <${Glass} class=${'toast' + (toast.kind === 'error' ? ' err' : '')} refract=${false} role="status">
@@ -1077,6 +1123,12 @@ function Hero({ total, target, range, pending, ytError, onRetry }) {
 
 function WeekGrid(p) {
   const { cols, heads, today, rowIds, ghostIds, isWorkDay, cellEntries, liveOf, sum, issueInfo, ytLink, timer, runningOn, suggAt, suggestions, edit } = p;
+  const unsorted = p.unsorted || [];
+  const [picking, setPicking] = useState(null);
+  // A busy calendar shouldn't bury the week: the longest few show, the rest on request.
+  const [allSort, setAllSort] = useState(false);
+  const SORT_SHOWN = 5;
+  const shownSort = allSort || unsorted.length <= SORT_SHOWN + 1 ? unsorted : unsorted.slice(0, SORT_SHOWN);
   const template = {
     '--cols': `minmax(var(--issue-w, 200px), 1fr) repeat(${cols.length}, minmax(var(--day-w, 78px), 108px)) var(--total-w, 80px)`,
     // Rows in the suggestions panel sit inset by --sugg-in on both sides. The first and last columns give up
@@ -1084,7 +1136,7 @@ function WeekGrid(p) {
     '--cols-in': `minmax(calc(var(--issue-w, 200px) - var(--sugg-in)), 1fr) repeat(${cols.length}, minmax(var(--day-w, 78px), 108px)) calc(var(--total-w, 80px) - var(--sugg-in))`,
     '--min': `calc(var(--issue-w, 200px) + ${cols.length} * var(--day-w, 78px) + var(--total-w, 80px))`,
   };
-  const empty = !rowIds.length && !ghostIds.length;
+  const empty = !rowIds.length && !ghostIds.length && !unsorted.length;
 
   const cell = (id, d, ghostRow) => {
     const here = cellEntries(id, d);
@@ -1120,7 +1172,7 @@ function WeekGrid(p) {
           onKeyDown=${keys}
           title=${`Suggested from ${s.title} (${s.when}). Click to add.`}
           aria-label=${`${id}, ${dayLabel(d)}: suggested ${fmt(s.minutes)} from ${s.title}. Press to add.`}>
-          <${Icon} name="sparkle" size=${11} stroke=${2} />${fmt(s.minutes)}
+          <${Icon} name=${suggIcon(s)} size=${11} stroke=${2} />${fmt(s.minutes)}
         </button>
         <button class="ghost-x" aria-label=${`Dismiss the suggestion for ${id} on ${dayLabel(d)}`} title="Dismiss" onClick=${() => p.onDismiss(s)}><${Icon} name="x" size=${11} stroke=${2.4} /></button>
       </div>`;
@@ -1166,6 +1218,37 @@ function WeekGrid(p) {
 
   const ghostTotal = suggestions.reduce((a, s) => a + s.minutes, 0);
 
+  // A meeting or a review that names no issue: choose one, or never see it again.
+  const sortRow = (u) => {
+    const what = u.kind === 'meeting' ? `the meeting “${u.label}”` : `the review of ${u.sub}`;
+    return html`<div class=${'wrow ghost-row sort-row' + (picking === u.key ? ' picking' : '')} key=${u.key} role="row">
+      <div class="issue" role="rowheader">
+        <span class="src-icon" aria-hidden="true"><${Icon} name=${u.kind === 'meeting' ? 'calendar' : 'review'} size=${14} /></span>
+        ${picking === u.key
+          ? html`<${AddIssue} compact minWidth=${380} exclude=${[]} placeholder=${u.kind === 'meeting' ? `Log “${u.label}” to…` : `Log this review to…`}
+              onClose=${() => setPicking(null)} onPick=${(i) => { setPicking(null); p.onMap(u, i); }} />`
+          : html`<div class="imeta">
+              ${webUrl(u.url) ? html`<a class="ikey" href=${webUrl(u.url)} target="_blank" rel="noopener noreferrer" title="Open on GitHub">${u.sub}</a>` : html`<span class="ikey">${u.sub}</span>`}
+              <span class="isum" title=${u.label}>${u.label}</span>
+            </div>
+            <button class="pick-btn" onClick=${() => setPicking(u.key)} aria-label=${`Choose an issue for ${what}`}><${Icon} name="plus" size=${12} stroke=${2.4} /><span>Choose issue</span></button>
+            <button class="row-x" aria-label=${`Don't suggest ${what} again`} title="Don't suggest again" onClick=${() => p.onIgnore(u)}><${Icon} name="x" size=${12} stroke=${2.2} /></button>`}
+      </div>
+      ${cols.map((d) => {
+        const c = u.cells[d];
+        const cls = ['cell', d === today ? 'today' : '', isWorkDay(d) ? '' : 'off', c ? 'has-ghost' : ''].join(' ');
+        if (!c) return html`<div class=${cls} key=${d} role="gridcell"></div>`;
+        return html`<div class=${cls} key=${d} role="gridcell">
+          <button class="ghost sort" onClick=${() => setPicking(u.key)}
+            title=${`${u.label}, ${c.when}. Choose an issue to log it.`}
+            aria-label=${`${u.label}, ${dayLabel(d)}: ${fmt(c.minutes)}, ${c.when}. Choose an issue to log it.`}>${fmt(c.minutes)}</button>
+          <button class="ghost-x" aria-label=${`Dismiss ${u.label} on ${dayLabel(d)}`} title="Dismiss" onClick=${() => p.onDismissCell(u, d)}><${Icon} name="x" size=${11} stroke=${2.4} /></button>
+        </div>`;
+      })}
+      <div class="rtotal"></div>
+    </div>`;
+  };
+
   return html`<div class="wgrid-scroll">
     <div class="wgrid" role="grid" aria-label="Time per issue and day" style=${template}>
       <div class="wrow ghead" role="row">
@@ -1186,14 +1269,21 @@ function WeekGrid(p) {
             : html`<button class="add-btn" onClick=${() => p.setAdding(true)}><${Icon} name="plus" size=${14} stroke=${2.2} /> Add issue</button>`}
         </div>
       </div>
-      ${ghostIds.length ? html`<div class="sugg" role="rowgroup" key="sugg" aria-label="Suggested from your YouTrack activity">
+      ${ghostIds.length || unsorted.length ? html`<div class="sugg" role="rowgroup" key="sugg" aria-label="Suggested from your activity">
         <div class="wrow section" role="row">
-          <div class="section-label" role="rowheader"><${Icon} name="sparkle" size=${13} /> From your YouTrack activity</div>
+          <div class="section-label" role="rowheader"><${Icon} name="sparkle" size=${13} /> From your activity</div>
           <div class="section-act" role="gridcell">
-            <button class="link" onClick=${() => p.onAccept(suggestions)}>Add all · ${fmt(ghostTotal)}</button>
+            ${suggestions.length ? html`<button class="link" onClick=${() => p.onAccept(suggestions)}>Add all · ${fmt(ghostTotal)}</button>` : null}
           </div>
         </div>
         ${ghostIds.map((id) => row(id, true))}
+        ${unsorted.length ? html`<div class="wrow section sub" role="row" key="sort-head">
+          <div class="section-label" role="rowheader">Not tied to an issue yet</div>
+        </div>` : null}
+        ${shownSort.map(sortRow)}
+        ${shownSort.length < unsorted.length ? html`<div class="wrow section sub more" role="row" key="sort-more">
+          <div class="section-label" role="gridcell"><button class="link" onClick=${() => setAllSort(true)}>Show ${unsorted.length - shownSort.length} more</button></div>
+        </div>` : null}
       </div>` : null}
     </div>
     ${empty ? html`<div class="empty">
@@ -1206,7 +1296,7 @@ function WeekGrid(p) {
   </div>`;
 }
 
-function AddIssue({ onClose, onPick, exclude }) {
+function AddIssue({ onClose, onPick, exclude, compact = false, placeholder, minWidth = 0, id = compact ? 'pickq' : 'rowq' }) {
   const [q, setQ] = useState('');
   const [list, setList] = useState(null);
   const [err, setErr] = useState('');
@@ -1239,12 +1329,16 @@ function AddIssue({ onClose, onPick, exclude }) {
     if (!f || !r0) return;
     const r = f.getBoundingClientRect();
     const vh = document.documentElement.clientHeight;
+    const vw = document.documentElement.clientWidth;
+    // A narrow field (choosing an issue inside a row) still gets a list wide enough to read.
+    const width = Math.min(Math.max(r.width, minWidth), vw - 24);
+    const left = Math.max(12, Math.min(r.left, vw - width - 12));
     const gap = 6;
     const want = Math.min(r0.scrollHeight, RESULTS_MAX) + 12;
     const below = vh - DOCK_ROOM - r.bottom - gap;
     const above = r.top - gap - 12;
     const up = want > below && above > below;
-    const next = { left: Math.round(r.left), width: Math.round(r.width), y: Math.round(up ? vh - r.top + gap : r.bottom + gap), up, max: Math.max(64, Math.floor(up ? above : below)) };
+    const next = { left: Math.round(left), width: Math.round(width), y: Math.round(up ? vh - r.top + gap : r.bottom + gap), up, max: Math.max(64, Math.floor(up ? above : below)) };
     const prev = posRef.current;
     if (prev && prev.left === next.left && prev.width === next.width && prev.y === next.y && prev.up === next.up && prev.max === next.max) return;
     posRef.current = next;
@@ -1300,7 +1394,7 @@ function AddIssue({ onClose, onPick, exclude }) {
   const style = pos
     ? { left: pos.left + 'px', width: pos.width + 'px', top: pos.up ? 'auto' : pos.y + 'px', bottom: pos.up ? pos.y + 'px' : 'auto', maxHeight: pos.max + 'px' }
     : { left: '0px', top: '0px', opacity: 0, pointerEvents: 'none' };
-  return html`<div class="addissue" ref=${box}
+  return html`<div class=${'addissue' + (compact ? ' compact' : '')} ref=${box}
     onFocusOut=${(e) => {
       // Tabbing away closes it too; a press on a result keeps focus in the field.
       const t = e.relatedTarget;
@@ -1309,21 +1403,21 @@ function AddIssue({ onClose, onPick, exclude }) {
     }}>
     <div class="addissue-field" ref=${field}>
       <${Icon} name="search" size=${15} />
-      <input id="rowq" ref=${ref} value=${q} placeholder="Find an issue: ID or a few words" autocomplete="off" aria-label="Find an issue to add"
-        role="combobox" aria-expanded="true" aria-controls="rowq-list" aria-autocomplete="list" aria-activedescendant=${items[hi] ? 'rowq-o' + hi : undefined}
+      <input id=${id} ref=${ref} value=${q} placeholder=${placeholder || 'Find an issue: ID or a few words'} autocomplete="off" aria-label=${placeholder || 'Find an issue to add'}
+        role="combobox" aria-expanded="true" aria-controls=${id + '-list'} aria-autocomplete="list" aria-activedescendant=${items[hi] ? id + '-o' + hi : undefined}
         onInput=${(e) => setQ(e.target.value)}
         onKeyDown=${(e) => {
           if (e.key === 'Escape') onClose();
           else if (e.key === 'ArrowDown') { e.preventDefault(); setHi(Math.min(hi + 1, items.length - 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(Math.max(hi - 1, 0)); } else if (e.key === 'Enter' && items[hi]) { e.preventDefault(); onPick(items[hi]); }
         }} />
-      <button class="btn btn-quiet btn-sm" onClick=${onClose}>Cancel</button>
+      ${compact ? null : html`<button class="btn btn-quiet btn-sm" onClick=${onClose}>Cancel</button>`}
     </div>
     <${Layer}>
       <div class=${'glass glass-strong addmenu' + (pos ? ' in' : '') + (pos && pos.up ? ' up' : '')} ref=${menu} style=${style}>
-        <div class="results" id="rowq-list" ref=${res} data-fade=${fade || undefined} onScroll=${edges} role="listbox" aria-label="Issues">
+        <div class="results" id=${id + '-list'} ref=${res} data-fade=${fade || undefined} onScroll=${edges} role="listbox" aria-label="Issues">
           ${err ? html`<div class="err-line pad">${err}</div>` : null}
           ${list === null ? html`<div class="muted small pad">Searching…</div>`
-            : items.length ? items.map((i, n) => html`<button key=${i.idReadable} id=${'rowq-o' + n} role="option" tabindex="-1" aria-selected=${n === hi} class=${'result' + (n === hi ? ' hi' : '')}
+            : items.length ? items.map((i, n) => html`<button key=${i.idReadable} id=${id + '-o' + n} role="option" tabindex="-1" aria-selected=${n === hi} class=${'result' + (n === hi ? ' hi' : '')}
               onPointerDown=${(e) => e.preventDefault()} onClick=${() => onPick(i)} onPointerMove=${(e) => { if (e.pointerType === 'mouse' && n !== hi) setHi(n); }}>
               <span class="mono">${i.idReadable}</span><span class="ell">${i.summary}</span></button>`)
               : html`<div class="muted small pad">No issues match.</div>`}
@@ -1331,6 +1425,18 @@ function AddIssue({ onClose, onPick, exclude }) {
       </div>
     <//>
   </div>`;
+}
+
+// Links from GitHub become links only if they are web addresses.
+const webUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? u : null);
+
+// A suggestion that comes only from meetings, or only from reviews, says so.
+function suggIcon(s) {
+  const src = s.sources;
+  if (!src) return 'sparkle';
+  if (src.meetings && !src.activity && !src.reviews) return 'calendar';
+  if (src.reviews && !src.activity && !src.meetings) return 'review';
+  return 'sparkle';
 }
 
 // ---------- popover + cell editor ----------
@@ -1417,7 +1523,16 @@ function CellEditor(props) {
   const [offered] = useState(() => !item && !!suggestion && !hasInitial);
   const [start] = useState(() => (hasInitial ? initial : cur ? fmt(cur) : offered ? fmt(suggestion.minutes) : ''));
   const [text, setText] = useState(start);
-  const [type, setType] = useState(item ? item.type || '' : '');
+  // Time suggested from meetings or reviews proposes that kind of work, if the project has it.
+  const [hinted] = useState(() => {
+    if (!offered || !Array.isArray(suggestion.typeHint) || !Array.isArray(types)) return null;
+    for (const h of suggestion.typeHint) {
+      const t = types.find((x) => x.toLowerCase() === String(h).toLowerCase());
+      if (t) return t;
+    }
+    return null;
+  });
+  const [type, setType] = useState(item ? item.type || '' : hinted || '');
   const [note, setNote] = useState(item ? item.text || '' : '');
   const [err, setErr] = useState('');
   const textRef = useRef(text);
@@ -1429,7 +1544,7 @@ function CellEditor(props) {
   const done = useRef(false);
   const cancelled = useRef(false);
   const touched = useRef(false);
-  const typeTouched = useRef(false);
+  const typeTouched = useRef(!!hinted);
   const explicit = useRef(false);
   const savedNote = useRef(item ? item.text || '' : '');
   const flushers = useRef(new Set());
@@ -1553,7 +1668,7 @@ function CellEditor(props) {
           </div>
         </div>
         ${err ? html`<div class="err-line" role="alert">${err}</div>` : null}
-        ${offered ? html`<div class="ed-hint"><${Icon} name="sparkle" size=${12} /> Suggested from ${suggestion.title}, ${suggestion.when}. Enter adds it.</div>` : null}
+        ${offered ? html`<div class="ed-hint"><${Icon} name="sparkle" size=${12} /> <span>Suggested from ${suggestion.title}, ${suggestion.when}. Enter adds it.${(suggestion.refs || []).filter((r) => webUrl(r.url)).map((r) => html` <a class="ed-ref" href=${webUrl(r.url)} target="_blank" rel="noopener noreferrer" title=${r.title || r.label}>${r.label.replace(/^[^/]+\//, '')}<${Icon} name="external" size=${11} /></a>`)}</span></div>` : null}
         ${types.length ? html`<div class="ed-row"><span id="ed-type-label">Type</span>
           <${Select} shape="field" fill labelledBy="ed-type-label" value=${type}
             options=${[
@@ -1873,7 +1988,103 @@ function SubmitSheet({ week, heads, target, timer, timerMin, typesFor, issueInfo
   <//>`;
 }
 
-function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect }) {
+// Where suggestions come from besides YouTrack: a calendar and GitHub. Connecting saves at
+// once (like Change for YouTrack), apart from the sheet's Save.
+const SOURCE_TEXT = {
+  calendar: {
+    name: 'Calendar',
+    off: 'Meetings, from its secret iCal address',
+    field: 'Secret address in iCal format',
+    input: 'url',
+    placeholder: 'https://calendar.google.com/calendar/ical/…/basic.ics',
+    help: html`Google Calendar: <b>Settings</b> → your calendar → <b>Integrate calendar</b> → <b>Secret address in iCal format</b>. Outlook: <b>Settings</b> → <b>Calendar</b> → <b>Shared calendars</b> → <b>Publish a calendar</b> → the ICS link. It stays on this computer.`,
+  },
+  github: {
+    name: 'GitHub reviews',
+    off: 'Pull requests you review',
+    field: 'Personal access token',
+    input: 'password',
+    placeholder: 'github_pat_…',
+    help: html`In GitHub: <b>Settings</b> → <b>Developer settings</b> → <b>Personal access tokens</b>. Read access to pull requests is enough; a classic token needs the <b>repo</b> scope only for private repositories. It stays on this computer.`,
+  },
+};
+
+function SourcesGroup({ onChanged }) {
+  const [src, setSrc] = useState(null);
+  const [open, setOpen] = useState(null);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const field = useRef(null);
+  useEffect(() => { api('GET', '/sources').then(setSrc).catch((e) => setErr(e.message)); }, []);
+  useLayoutEffect(() => { if (open && field.current) field.current.focus(); }, [open]);
+  const start = (kind) => { setOpen(kind); setValue(''); setErr(''); };
+  const connect = async (kind) => {
+    if (!value.trim()) { if (field.current) field.current.focus(); return; }
+    setBusy(true);
+    setErr('');
+    try {
+      setSrc(await api('POST', '/sources/' + kind, kind === 'calendar' ? { url: value } : { token: value }));
+      setOpen(null);
+      setValue('');
+      onChanged();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (kind) => {
+    setErr('');
+    try { setSrc(await api('POST', `/sources/${kind}/remove`)); onChanged(); } catch (e) { setErr(e.message); }
+  };
+  const forget = async (m) => {
+    setErr('');
+    try { await api('POST', '/suggestions/unmap', { key: m.key }); setSrc(await api('GET', '/sources')); onChanged(); } catch (e) { setErr(e.message); }
+  };
+  const row = (kind) => {
+    const t = SOURCE_TEXT[kind];
+    const st = src && src[kind];
+    if (open === kind) {
+      return html`<div class="srow src-form" key=${kind}>
+        <label class="src-label" for=${'src-' + kind}>${t.field}</label>
+        <input id=${'src-' + kind} ref=${field} type=${t.input} value=${value} placeholder=${t.placeholder} autocomplete="off" spellcheck="false"
+          onInput=${(e) => setValue(e.target.value)}
+          onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); connect(kind); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(null); } }} />
+        <p class="src-help">${t.help}</p>
+        <div class="src-acts">
+          <button class="btn btn-quiet btn-sm" onClick=${() => setOpen(null)}>Cancel</button>
+          <button class="btn btn-accent btn-sm" onClick=${() => connect(kind)} disabled=${busy}>${busy ? 'Checking…' : 'Connect'}</button>
+        </div>
+      </div>`;
+    }
+    if (st && st.connected) {
+      const who = kind === 'calendar' ? st.name || 'Connected' : '@' + st.login;
+      return html`<div class="srow account" key=${kind}><span>${t.name}<span class="muted small block">${who}</span></span>
+        <span class="srow-acts"><button class="btn btn-sm" onClick=${() => remove(kind)}>Remove</button></span></div>`;
+    }
+    return html`<div class="srow account" key=${kind}><span>${t.name}<span class="muted small block">${t.off}</span></span>
+      <span class="srow-acts"><button class="btn btn-sm" onClick=${() => start(kind)} disabled=${!src}>Connect</button></span></div>`;
+  };
+  const maps = (src && src.mappings) || [];
+  return html`<div class="group">
+    <div class="group-title">Suggestions from</div>
+    <div class="srow account"><span>YouTrack activity<span class="muted small block">Comments, field changes, commits and more</span></span><span class="muted small">Always</span></div>
+    ${row('calendar')}
+    ${row('github')}
+    ${maps.length ? html`<div class="srow remembered">
+      <span class="muted small">Remembered</span>
+      <ul class="maps">${maps.map((m) => html`<li key=${m.key}>
+        <span class="ell"><${Icon} name=${m.kind === 'meeting' ? 'calendar' : 'review'} size=${12} /> ${m.label}</span>
+        <span class="map-to">${m.ignore ? 'never suggested' : html`→ <span class="mono">${m.issue}</span>`}</span>
+        <button class="row-x" aria-label=${`Forget the choice for ${m.label}`} title="Forget" onClick=${() => forget(m)}><${Icon} name="x" size=${11} stroke=${2.2} /></button>
+      </li>`)}</ul>
+    </div>` : null}
+    ${err ? html`<p class="form-error src-error" role="alert">${err}</p>` : null}
+  </div>`;
+}
+
+function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect, onSources }) {
   const s = week.settings;
   const [target, setTarget] = useState(fmt(s.dailyTargetMinutes));
   const [workDays, setWorkDays] = useState(s.workDays);
@@ -1933,6 +2144,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect }
           onChange=${(v) => setDefs(Object.assign({}, defs, { [p.shortName]: v }))} />
       </div>`) : html`<div class="srow muted small">Projects appear here once you've logged on them.</div>`}
     </div>
+    <${SourcesGroup} onChanged=${onSources || (() => {})} />
     <div class="group">
       <div class="group-title">Appearance</div>
       <div class="srow"><span id="s-theme-label">Theme</span>
