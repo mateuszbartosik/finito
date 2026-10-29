@@ -386,7 +386,7 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
   const listId = uid + '-list';
   const chevron = html`<span class="sel-chev"><${Icon} name="chevron" size=${16} stroke=${1.75} /></span>`;
   const surface = shown ? html`<${Layer}>
-    <div ref=${surf} class=${'glass glass-strong sel-surface' + (shape === 'field' ? ' field' : '')}>
+    <div ref=${surf} class=${'glass glass-strong sel-surface' + (shape === 'field' ? ' sel-field' : '')}>
       <div class="sel-head" aria-hidden="true" onPointerDown=${(e) => e.preventDefault()} onClick=${() => setOpen(false)}>
         <span class="sel-value">${cur.label}</span>${chevron}
       </div>
@@ -408,7 +408,7 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
     </div>
   <//>` : null;
   return html`<span class=${'sel' + (fill ? ' fill' : '')}>
-    <button type="button" id=${uid} ref=${trig} class=${'sel-trigger' + (shape === 'field' ? ' field' : '')}
+    <button type="button" id=${uid} ref=${trig} class=${'sel-trigger' + (shape === 'field' ? ' sel-field' : '')}
       role="combobox" aria-haspopup="listbox" aria-expanded=${open ? 'true' : 'false'}
       aria-controls=${shown ? listId : undefined}
       aria-activedescendant=${open && active >= 0 ? `${uid}-o${active}` : undefined}
@@ -510,6 +510,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
   const [mine, setMine] = useState([]);
   const [sugg, setSugg] = useState({ loading: true, items: [], unsorted: [], errors: [], monday: null });
   const [edit, setEdit] = useState(null);
+  const [edWide, setEdWide] = useState(false);
   const [timerPop, setTimerPop] = useState(false);
   const [toast, setToast] = useState(null);
   const [sheet, setSheet] = useState(null);
@@ -1049,9 +1050,9 @@ function Main({ status, onReconnect, onUnauthorized }) {
       onStop=${stopTimer} trim=${trim} timerDate=${timerDate} today=${today}
     />
 
-    ${edit ? html`<${Popover} key=${edit.issue + edit.date} anchorId=${cellId(edit.issue, edit.date)} onDismiss=${() => closeEditor(true)} onEscape=${() => closeEditor(false, true)}>
+    ${edit ? html`<${Popover} key=${edit.issue + edit.date} anchorId=${cellId(edit.issue, edit.date)} width=${edWide ? 420 : 340} onDismiss=${() => closeEditor(true)} onEscape=${() => closeEditor(false, true)}>
       <${CellEditor}
-        api=${editorRef}
+        api=${editorRef} onWide=${setEdWide}
         issue=${edit.issue} date=${edit.date} initial=${edit.initial}
         info=${issueInfo(edit.issue)} ytLink=${ytLink(edit.issue)}
         entries=${cellEntries(edit.issue, edit.date)} liveOf=${liveOf} sum=${sum}
@@ -1510,6 +1511,9 @@ function CellEditor(props) {
   const [newRow, setNewRow] = useState(false);
   const single = entries.length <= 1 && !listOpen;
   const item = single ? entries[0] || null : null;
+  // The list of entries gets a wider editor, with room for each one's type and note.
+  useLayoutEffect(() => { if (props.onWide) props.onWide(!single); }, [single]);
+  useLayoutEffect(() => () => { if (props.onWide) props.onWide(false); }, []);
   const addBtn = useRef(null);
   const hadNewRow = useRef(false);
   useLayoutEffect(() => {
