@@ -392,3 +392,61 @@ test('the connect form is described by the tracker, and a saved token is kept or
     await t.done();
   }
 });
+
+// A tracker without work types or activity, the way Jira will be. It reuses the YouTrack
+// adapter and mock underneath, so only the capabilities differ.
+const { YouTrack } = require('../lib/youtrack');
+class PlainTracker extends YouTrack {
+  static id = 'plain';
+  static label = 'Plain';
+  static capabilities = { workTypes: false, activity: false };
+  links() { return { issue: this.base + '/browse/{key}', timesheets: null }; }
+}
+
+test('a tracker without work types or activity: no types anywhere, hints go in the note', async () => {
+  const mock = createMockYouTrack({ token: 'secret' });
+  const ytUrl = await mock.start();
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finito-test-'));
+  const app = createApp({ port: 0, dataDir, trackers: [YouTrack, PlainTracker] });
+  const port = await app.start();
+  const call = async (method, p, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: Object.assign({ 'x-finito': '1' }, body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
+    return { status: res.status, body: await res.json() };
+  };
+  try {
+    let r = await call('GET', '/api/status');
+    assert.deepEqual(r.body.trackers.map((t) => t.id), ['youtrack', 'plain']);
+    r = await call('POST', '/api/setup', { tracker: 'plain', url: ytUrl, token: 'secret' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.tracker, 'plain');
+
+    const today = D.localDate();
+    r = await call('GET', '/api/week');
+    assert.deepEqual(r.body.tracker, { id: 'plain', label: 'Plain', workTypes: false, activity: false, links: { issue: ytUrl + '/browse/{key}', timesheets: null } });
+    assert.ok(Object.values(r.body.projects).every((p) => p.types.length === 0), 'no types offered');
+
+    // The mock has activity; a tracker without activity doesn't ask for it, or for work types.
+    r = await call('GET', '/api/suggestions');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.suggestions.length, 0);
+    assert.equal(mock.state.calls.some((c) => /\/api\/activities|timeTracking(Settings|\/workItemTypes)/.test(c.path || c)), false, JSON.stringify(mock.state.calls));
+
+    r = await call('POST', '/api/entries', { issue: 'APP-1221', dates: [today], minutes: 30, typeHint: ['Meeting', 'Meetings'] });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.type, null);
+    r = await call('POST', '/api/entries', { issue: 'APP-1221', dates: [today], minutes: 15, type: 'Review' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /Plain has no work types/);
+
+    r = await call('GET', '/api/pending');
+    const [draft] = r.body.items;
+    assert.equal(draft.text, 'Meeting');
+    r = await call('POST', '/api/submit/' + encodeURIComponent(draft.key));
+    assert.equal(r.body.ok, true, JSON.stringify(r.body));
+    assert.equal(r.body.entry.type, null);
+    assert.equal(r.body.entry.text, 'Meeting');
+  } finally {
+    await app.stop();
+    await mock.stop();
+  }
+});
