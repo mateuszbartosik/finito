@@ -533,7 +533,7 @@ function Setup({ status, canCancel, onCancel, onDone }) {
       ${help ? html`<details class="howto">
         <summary>${help.title}</summary>
         <ol>${help.steps.map((step, i) => html`<li key=${i}>${boldParts(step)}</li>`)}</ol>
-        ${origin && help.link ? html`<a href=${origin + help.link.path} target="_blank" rel="noopener noreferrer">${help.link.label} <${Icon} name="external" size=${12} /></a>` : null}
+        ${help.link && (help.link.href || origin) ? html`<a href=${help.link.href || origin + help.link.path} target="_blank" rel="noopener noreferrer">${help.link.label} <${Icon} name="external" size=${12} /></a>` : null}
       </details>` : null}
       ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
       <div class="actions">
