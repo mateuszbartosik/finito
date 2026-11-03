@@ -84,6 +84,10 @@ Daily target, work days, end of your day, timer rounding, light or dark theme, a
 
 Controls float on a liquid glass layer over a quiet week. In Chrome and Edge the edges of the glass also bend what's behind them; other browsers get the frosted version. Finito follows your system's light or dark mode unless you pick one in Settings, and its Reduce transparency, Increase contrast and Reduce motion settings.
 
+## Web demo
+
+`npm run build:demo` builds a version of the demo that runs entirely in the browser, into `dist-demo/`. It bundles Finito's own server code and the sample data with small stand-ins for Node's `fs`, `path` and `http` (in `web-demo/`), so the page needs no server: any static host can serve the folder. Each visitor gets their own sample week in memory; nothing is sent anywhere, and a reload starts fresh.
+
 ## Where your data lives
 
 - `data/config.json`: the YouTrack address and your token, and, if you connected them, your calendar's secret address and your GitHub token, all in plain text. **Settings → Change** replaces the YouTrack ones and **Remove** clears the others; deleting the file disconnects Finito. Keep the folder private, and revoke the tokens (and reset the calendar's secret address) if this computer is ever lost.
