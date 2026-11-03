@@ -466,18 +466,40 @@ function App() {
   return html`<${Main} status=${status} onReconnect=${onReconnect} onUnauthorized=${onUnauthorized} />`;
 }
 
+// The tracker the status points at, as /api/status describes it. Older servers sent no
+// description, so YouTrack is the fallback.
+const YOUTRACK_FORM = {
+  id: 'youtrack', label: 'YouTrack', help: null,
+  fields: [
+    { name: 'url', label: 'Address', placeholder: 'https://youtrack.example.com', required: true },
+    { name: 'token', label: 'Permanent token', placeholder: 'perm:…', secret: true, required: true },
+  ],
+};
+function trackerOf(status, id) {
+  const list = (status && status.trackers) || [];
+  return list.find((t) => t.id === (id || status.tracker)) || list[0] || YOUTRACK_FORM;
+}
+
+// Help text marks what to click with **bold**.
+const boldParts = (text) => String(text).split(/\*\*(.+?)\*\*/g).map((part, i) => (i % 2 ? html`<b>${part}</b>` : part));
+
 function Setup({ status, canCancel, onCancel, onDone }) {
-  const [url, setUrl] = useState(status.url || '');
-  const [token, setToken] = useState('');
+  const [trackerId, setTrackerId] = useState(trackerOf(status).id);
+  const tracker = trackerOf(status, trackerId);
+  const [values, setValues] = useState(() => ({ url: status.url || '' }));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(status.ytStatus === 401 ? 'YouTrack no longer accepts the saved token. Paste a new one.' : status.error || '');
+  const [error, setError] = useState(status.ytStatus === 401 ? `${tracker.label} no longer accepts the saved token. Paste a new one.` : status.error || '');
+  const savedHere = status.configured && trackerId === status.tracker;
+  const set = (name, v) => setValues((x) => Object.assign({}, x, { [name]: v }));
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const r = await api('POST', '/setup', { url, token });
-      onDone({ configured: true, url: r.url, user: r.user });
+      const body = { tracker: tracker.id };
+      for (const f of tracker.fields) body[f.name] = values[f.name] || '';
+      const r = await api('POST', '/setup', body);
+      onDone(Object.assign({}, status, { configured: true, url: r.url, user: r.user, tracker: r.tracker || tracker.id, ytStatus: 0, error: '' }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -485,29 +507,29 @@ function Setup({ status, canCancel, onCancel, onDone }) {
     }
   };
   let origin = null;
+  const url = values.url || '';
   try { origin = new URL(/^https?:/i.test(url) ? url : 'https://' + url).origin; } catch (_) { /* not yet a URL */ }
+  const help = tracker.help;
+  const all = (status.trackers || []).length > 1 ? status.trackers : null;
   return html`<div class="setup-wrap">
     <${Glass} as="form" class="setup glass-strong" radius=${30} bezel=${22} scale=${26} blur=${12} onSubmit=${submit}>
       <${Mark} size=${40} />
-      <h1>Connect YouTrack</h1>
+      <h1>Connect ${tracker.label}</h1>
       <p class="sub">Finito runs on this computer and logs time as you. Your token stays here.</p>
-      <label class="field">
-        <span>Address</span>
-        <input id="url" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="https://youtrack.example.com" required />
-      </label>
-      <label class="field">
-        <span>Permanent token</span>
-        <input id="token" type="password" value=${token} onInput=${(e) => setToken(e.target.value)} placeholder=${status.configured ? 'Leave empty to keep the saved one' : 'perm:…'} autocomplete="off" />
-      </label>
-      <details class="howto">
-        <summary>Where do I get a token?</summary>
-        <ol>
-          <li>In YouTrack: your avatar → <b>Profile</b> → <b>Account Security</b>.</li>
-          <li><b>New token…</b>, name it “Finito”, scope <b>YouTrack</b>.</li>
-          <li>Copy it now (YouTrack shows it once) and paste it here.</li>
-        </ol>
-        ${origin ? html`<a href=${origin + '/users/me'} target="_blank" rel="noopener noreferrer">Open my YouTrack profile <${Icon} name="external" size=${12} /></a>` : null}
-      </details>
+      ${all ? html`<div class="field"><span id="tracker-label">Tracker</span>
+        <${Select} id="tracker" labelledBy="tracker-label" value=${trackerId} fill=${true}
+          options=${all.map((t) => ({ value: t.id, label: t.label }))} onChange=${(v) => { setTrackerId(v); setError(''); }} /></div>` : null}
+      ${tracker.fields.map((f) => html`<label class="field" key=${tracker.id + ':' + f.name}>
+        <span>${f.label}</span>
+        <input id=${f.name} type=${f.secret ? 'password' : 'text'} value=${values[f.name] || ''} onInput=${(e) => set(f.name, e.target.value)}
+          placeholder=${f.secret && savedHere ? 'Leave empty to keep the saved one' : f.placeholder}
+          required=${f.required && !f.secret} autocomplete="off" />
+      </label>`)}
+      ${help ? html`<details class="howto">
+        <summary>${help.title}</summary>
+        <ol>${help.steps.map((step, i) => html`<li key=${i}>${boldParts(step)}</li>`)}</ol>
+        ${origin && help.link ? html`<a href=${origin + help.link.path} target="_blank" rel="noopener noreferrer">${help.link.label} <${Icon} name="external" size=${12} /></a>` : null}
+      </details>` : null}
       ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
       <div class="actions">
         ${canCancel ? html`<button type="button" class="btn" onClick=${onCancel}>Cancel</button>` : null}
@@ -2180,7 +2202,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect, 
           options=${[{ value: 'system', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} /></div>
     </div>
     <div class="group">
-      <div class="group-title">YouTrack</div>
+      <div class="group-title">${trackerOf(status).label}</div>
       <div class="srow account"><span>${status.user ? status.user.fullName || status.user.login : 'Connected'}<span class="muted small block">${host}</span></span>
         <span class="srow-acts"><button class="btn btn-sm" onClick=${onReload}>Reload</button><button class="btn btn-sm" onClick=${onReconnect}>Change</button></span></div>
     </div>

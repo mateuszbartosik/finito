@@ -264,7 +264,8 @@ test('setup, week, edit, remove, submit, timer, suggestions', async () => {
     const state = JSON.parse(fs.readFileSync(path.join(t.dataDir, 'state.json'), 'utf8'));
     assert.equal(state.settings.dailyTargetMinutes, 450);
     const cfg = JSON.parse(fs.readFileSync(path.join(t.dataDir, 'config.json'), 'utf8'));
-    assert.equal(cfg.token, 'secret');
+    assert.equal(cfg.tracker, 'youtrack');
+    assert.deepEqual(cfg.trackerCreds, { url: t.ytUrl, token: 'secret' });
   } finally {
     await t.done();
   }
@@ -324,5 +325,70 @@ test('a rejected token surfaces as 401', async () => {
   } catch (e) {
     await t.mock.stop().catch(() => {});
     throw e;
+  }
+});
+
+test('a config.json from before trackers moves to the new shape on start', async () => {
+  const mock = createMockYouTrack({ token: 'secret' });
+  const ytUrl = await mock.start();
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finito-test-'));
+  const cfgPath = path.join(dataDir, 'config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify({ youtrackUrl: ytUrl, token: 'secret', calendarUrl: '', githubToken: 'gh', githubLogin: 'me' }));
+  const app = createApp({ port: 0, dataDir });
+  try {
+    const port = await app.start();
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    assert.equal(cfg.tracker, 'youtrack');
+    assert.deepEqual(cfg.trackerCreds, { url: ytUrl, token: 'secret' });
+    assert.equal('youtrackUrl' in cfg, false);
+    assert.equal('token' in cfg, false);
+    assert.equal(cfg.githubToken, 'gh', 'the rest stays');
+    const st = await (await fetch(`http://127.0.0.1:${port}/api/status`, { headers: { 'x-finito': '1' } })).json();
+    assert.equal(st.configured, true);
+    assert.equal(st.user.login, 'sample');
+  } finally {
+    await app.stop();
+    await mock.stop();
+  }
+});
+
+test('the connect form is described by the tracker, and a saved token is kept or forgotten', async () => {
+  const t = await setup();
+  try {
+    let r = await t.call('GET', '/api/status');
+    assert.equal(r.body.tracker, 'youtrack');
+    const yt = r.body.trackers.find((x) => x.id === 'youtrack');
+    assert.equal(yt.label, 'YouTrack');
+    assert.deepEqual(yt.fields.map((f) => [f.name, f.secret, f.required]), [['url', false, true], ['token', true, true]]);
+    assert.ok(yt.help.steps.length);
+
+    r = await t.call('POST', '/api/setup', { url: t.ytUrl });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /permanent token/);
+    r = await t.call('POST', '/api/setup', { tracker: 'nope', url: t.ytUrl, token: 'secret' });
+    assert.equal(r.status, 400);
+
+    r = await t.call('POST', '/api/setup', { url: t.ytUrl, token: 'secret' });
+    assert.equal(r.status, 200, r.text);
+    assert.equal(r.body.tracker, 'youtrack');
+    r = await t.call('GET', '/api/status');
+    assert.equal(/:\s*"secret"/.test(r.text), false, 'the token never goes back to the browser');
+
+    // Changing the address with the token left empty keeps the saved token.
+    r = await t.call('POST', '/api/setup', { url: t.ytUrl + '/issue/APP-1', token: '' });
+    assert.equal(r.status, 200, r.text);
+
+    // Disconnecting forgets the token and keeps the address.
+    await t.call('POST', '/api/disconnect');
+    const cfg = JSON.parse(fs.readFileSync(path.join(t.dataDir, 'config.json'), 'utf8'));
+    assert.deepEqual(cfg.trackerCreds, { url: t.ytUrl, token: '' });
+    r = await t.call('GET', '/api/status');
+    assert.equal(r.body.configured, false);
+    assert.equal(r.body.url, t.ytUrl);
+    r = await t.call('GET', '/api/week');
+    assert.equal(r.status, 409);
+    assert.match(r.body.error, /Connect YouTrack first/);
+  } finally {
+    await t.done();
   }
 });
