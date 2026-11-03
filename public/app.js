@@ -421,9 +421,24 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
   </span>`;
 }
 
+// The logo: a glass pebble with its eyes closed, on an ink tile (the same drawing as favicon.svg, with glass).
+const PEBBLE = 'M-100 8C-104.3-12.3-99.3-37-88-52C-76.7-67-52.7-77.3-32-82C-11.3-86.7 15.7-86 36-80C56.3-74 78.7-61 90-46C101.3-31 105.7-8 104 10C102.3 28 95.7 50.3 80 62C64.3 73.7 33.7 78.7 10 80C-13.7 81.3-43.7 82-62 70C-80.3 58-95.7 28.3-100 8Z';
+const PEBBLE_SHINE = 'M-92 3.2C-95.9-15.1-91.4-37.3-81.2-50.8C-71-64.3-49.4-73.6-30.8-77.8C-12.2-82 12.1-81.4 30.4-76C48.7-70.6 68.8-58.9 79-45.4C89.2-31.9 93.1-11.2 91.6 5C90.1 21.2 84.1 41.3 70 51.8C55.9 62.3 28.3 66.8 7 68C-14.3 69.2-41.3 69.8-57.8 59C-74.3 48.2-88.1 21.5-92 3.2Z';
+
 function Mark({ size = 28 }) {
   return html`<span class="mark" style=${{ width: size + 'px', height: size + 'px' }} aria-hidden="true">
-    <svg viewBox="0 0 32 32" width=${size} height=${size}><circle cx="16" cy="17" r="10.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M16 17V11.5M13 3.5h6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+    <svg viewBox="0 0 512 512" width=${size} height=${size}>
+      <defs>
+        <linearGradient id="mark-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#dfe4ee"/></linearGradient>
+        <radialGradient id="mark-shine" cx="0.32" cy="0.22" r="0.5"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+      </defs>
+      <rect width="512" height="512" rx="118" fill="#0d1424"/>
+      <g transform="translate(254 259) scale(1.555)">
+        <path d=${PEBBLE} fill="url(#mark-body)"/>
+        <path d=${PEBBLE_SHINE} fill="url(#mark-shine)" opacity="0.9"/>
+        <path d="M-48-15.8Q-32 1.2-16-15.8M24-15.8Q40 1.2 56-15.8" fill="none" stroke="#0d1424" stroke-width="10.5" stroke-linecap="round"/>
+      </g>
+    </svg>
   </span>`;
 }
 
