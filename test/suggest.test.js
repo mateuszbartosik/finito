@@ -7,7 +7,8 @@ const D = require('../lib/dates');
 
 const day = '2026-10-29';
 const at = (h, m) => D.localMidnightMs(day) + (h * 60 + m) * 60000;
-const issue = (id, summary) => ({ idReadable: id, summary, project: { shortName: id.split('-')[0] } });
+const issue = (key, title) => ({ key, dbId: null, title, resolved: false, project: { key: key.split('-')[0], name: '', dbId: null }, url: '' });
+const act = (id, at, kind, iss, state = null) => ({ id, at, kind, issue: iss, state });
 
 test('estimate', () => {
   assert.equal(estimateMinutes(0, 0, 1), 15);
@@ -18,13 +19,13 @@ test('estimate', () => {
 
 test('groups by issue and day, skips logged and dismissed', () => {
   const acts = [
-    { id: '1', timestamp: at(11, 40), category: { id: 'CommentsCategory' }, target: { id: 'c1', issue: issue('A-1', 'One') } },
-    { id: '2', timestamp: at(14, 10), category: { id: 'CommentsCategory' }, target: { id: 'c2', issue: issue('A-1', 'One') } },
-    { id: '2', timestamp: at(14, 10), category: { id: 'CommentsCategory' }, target: { id: 'c2', issue: issue('A-1', 'One') } }, // duplicate
-    { id: '3', timestamp: at(12, 0), category: { id: 'CustomFieldCategory' }, field: { name: 'State' }, added: [{ name: 'In Progress' }], target: issue('A-1', 'One') },
-    { id: '4', timestamp: at(10, 0), category: { id: 'AttachmentsCategory' }, target: issue('B-2', 'Two') },
-    { id: '5', timestamp: at(10, 0), category: { id: 'IssueCreatedCategory' }, target: issue('C-3', 'Three') },
-    { id: '6', timestamp: D.localMidnightMs('2026-11-20'), category: { id: 'CommentsCategory' }, target: issue('A-1', 'One') }, // other week
+    act('1', at(11, 40), 'comment', issue('A-1', 'One')),
+    act('2', at(14, 10), 'comment', issue('A-1', 'One')),
+    act('2', at(14, 10), 'comment', issue('A-1', 'One')), // duplicate
+    act('3', at(12, 0), 'field', issue('A-1', 'One'), 'In Progress'),
+    act('4', at(10, 0), 'attachment', issue('B-2', 'Two')),
+    act('5', at(10, 0), 'created', issue('C-3', 'Three')),
+    act('6', D.localMidnightMs('2026-11-20'), 'comment', issue('A-1', 'One')), // other week
   ];
   const out = buildSuggestions(acts, { dates: [day], existing: new Set(['B-2|' + day]), dismissed: { ['C-3|' + day]: 1 } });
   assert.equal(out.length, 1);
@@ -38,7 +39,7 @@ test('groups by issue and day, skips logged and dismissed', () => {
 test('reviews and meetings join the same issue-day; overlaps count once', () => {
   const pr = { label: 'acme/web#42', url: 'https://github.com/acme/web/pull/42', title: 'A-1: empty state' };
   const out = buildSuggestions([
-    { id: '1', timestamp: at(10, 0), category: { id: 'CommentsCategory' }, target: { id: 'c1', issue: issue('A-1', 'One') } },
+    act('1', at(10, 0), 'comment', issue('A-1', 'One')),
   ], {
     dates: [day],
     points: [
@@ -70,8 +71,8 @@ test('reviews and meetings join the same issue-day; overlaps count once', () => 
 test('separate sources on one day stay separate spans', () => {
   const pr = { label: 'acme/web#42', url: 'u', title: 'A-1' };
   const [s] = buildSuggestions([
-    { id: '1', timestamp: at(15, 30), category: { id: 'CommentsCategory' }, target: { id: 'c1', issue: issue('A-1', 'One') } },
-    { id: '2', timestamp: at(16, 5), category: { id: 'CommentsCategory' }, target: { id: 'c2', issue: issue('A-1', 'One') } },
+    act('1', at(15, 30), 'comment', issue('A-1', 'One')),
+    act('2', at(16, 5), 'comment', issue('A-1', 'One')),
   ], { dates: [day], points: [
     { issue: issue('A-1', 'One'), at: at(10, 5), kind: 'review-comment', ref: pr },
     { issue: issue('A-1', 'One'), at: at(10, 40), kind: 'review', ref: pr },
@@ -82,7 +83,7 @@ test('separate sources on one day stay separate spans', () => {
 });
 
 test('a comment wrapped in a review of its own counts once, and replies on my own pull request are comments', () => {
-  const issue = { idReadable: 'APP-1', summary: 'Something', project: { shortName: 'APP' } };
+  const issue = { key: 'APP-1', dbId: null, title: 'Something', resolved: false, project: { key: 'APP', name: '', dbId: null }, url: '' };
   const ref = { label: 'acme/web#50', url: 'https://github.example.com/acme/web/pull/50', title: 'APP-1: something' };
   const at = (h, m) => new Date(2026, 9, 28, h, m).getTime();
   const points = [
