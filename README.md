@@ -1,8 +1,8 @@
 # Finito
 
-A week-first timesheet for [YouTrack](https://www.jetbrains.com/youtrack/). Type your hours into a week, or log them in one line, and send them to YouTrack when the week looks right.
+A week-first timesheet for [YouTrack](https://www.jetbrains.com/youtrack/) and [Jira Cloud](https://www.atlassian.com/software/jira). Type your hours into a week, or log them in one line, and send them to your tracker when the week looks right.
 
-Finito runs on your own computer. Nothing gets installed in YouTrack: Finito talks to it with your personal token, the same way you would.
+Finito runs on your own computer. Nothing gets installed in your tracker: Finito talks to it with your personal token, the same way you would.
 
 The name is casual Polish for "finished", which is what the week is once it's in YouTrack.
 
@@ -37,6 +37,16 @@ On Windows you can also double-click `start.cmd`. Finito opens <http://localhost
 2. Under **Tokens**, choose **New token…**, name it "Finito", give it the **YouTrack** scope, and copy it.
 3. In Finito, enter your YouTrack's address (for example `https://yourcompany.youtrack.cloud`) and paste the token.
 
+## Connect Jira
+
+Choose **Jira** under **Tracker** when Finito asks you to connect.
+
+1. Open your Atlassian account → **Security** → **API tokens** (<https://id.atlassian.com/manage-profile/security/api-tokens>).
+2. Choose **Create API token with scopes**, name it "Finito", pick the **Jira** app and the scopes **read:jira-work**, **write:jira-work** and **read:jira-user**. A token without scopes works too.
+3. In Finito, enter your site (for example `https://yourcompany.atlassian.net`, or just `yourcompany`), the email you sign in with, and the token.
+
+Time tracking has to be on in Jira. Jira has no work types, so Finito doesn't ask for one; time from meetings and reviews says "Meeting" or "Review" in its note instead. Suggestions come from your calendar and GitHub, since Jira has no activity feed Finito can read. A day's time goes in at 09:00 your time.
+
 ## Calendar and GitHub (optional)
 
 Both connect in **Settings → Suggestions from**. Their address and token stay on this computer.
@@ -54,7 +64,7 @@ A meeting counts when it's over, has someone besides you, and you didn't decline
 
 ## Try it without touching YouTrack
 
-`npm run demo` (or double-click `demo.cmd`) opens <http://localhost:5179> against a fake YouTrack, calendar and GitHub with sample data. It starts fresh every time.
+`npm run demo` (or double-click `demo.cmd`) opens <http://localhost:5179> against a fake YouTrack, calendar and GitHub with sample data. `npm run demo:jira` does the same with a fake Jira. It starts fresh every time.
 
 ## The bar
 

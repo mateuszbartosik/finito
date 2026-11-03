@@ -264,7 +264,8 @@ test('setup, week, edit, remove, submit, timer, suggestions', async () => {
     const state = JSON.parse(fs.readFileSync(path.join(t.dataDir, 'state.json'), 'utf8'));
     assert.equal(state.settings.dailyTargetMinutes, 450);
     const cfg = JSON.parse(fs.readFileSync(path.join(t.dataDir, 'config.json'), 'utf8'));
-    assert.equal(cfg.token, 'secret');
+    assert.equal(cfg.tracker, 'youtrack');
+    assert.deepEqual(cfg.trackerCreds, { url: t.ytUrl, token: 'secret' });
   } finally {
     await t.done();
   }
@@ -324,5 +325,128 @@ test('a rejected token surfaces as 401', async () => {
   } catch (e) {
     await t.mock.stop().catch(() => {});
     throw e;
+  }
+});
+
+test('a config.json from before trackers moves to the new shape on start', async () => {
+  const mock = createMockYouTrack({ token: 'secret' });
+  const ytUrl = await mock.start();
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finito-test-'));
+  const cfgPath = path.join(dataDir, 'config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify({ youtrackUrl: ytUrl, token: 'secret', calendarUrl: '', githubToken: 'gh', githubLogin: 'me' }));
+  const app = createApp({ port: 0, dataDir });
+  try {
+    const port = await app.start();
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    assert.equal(cfg.tracker, 'youtrack');
+    assert.deepEqual(cfg.trackerCreds, { url: ytUrl, token: 'secret' });
+    assert.equal('youtrackUrl' in cfg, false);
+    assert.equal('token' in cfg, false);
+    assert.equal(cfg.githubToken, 'gh', 'the rest stays');
+    const st = await (await fetch(`http://127.0.0.1:${port}/api/status`, { headers: { 'x-finito': '1' } })).json();
+    assert.equal(st.configured, true);
+    assert.equal(st.user.login, 'sample');
+  } finally {
+    await app.stop();
+    await mock.stop();
+  }
+});
+
+test('the connect form is described by the tracker, and a saved token is kept or forgotten', async () => {
+  const t = await setup();
+  try {
+    let r = await t.call('GET', '/api/status');
+    assert.equal(r.body.tracker, 'youtrack');
+    const yt = r.body.trackers.find((x) => x.id === 'youtrack');
+    assert.equal(yt.label, 'YouTrack');
+    assert.deepEqual(yt.fields.map((f) => [f.name, f.secret, f.required]), [['url', false, true], ['token', true, true]]);
+    assert.ok(yt.help.steps.length);
+
+    r = await t.call('POST', '/api/setup', { url: t.ytUrl });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /permanent token/);
+    r = await t.call('POST', '/api/setup', { tracker: 'nope', url: t.ytUrl, token: 'secret' });
+    assert.equal(r.status, 400);
+
+    r = await t.call('POST', '/api/setup', { url: t.ytUrl, token: 'secret' });
+    assert.equal(r.status, 200, r.text);
+    assert.equal(r.body.tracker, 'youtrack');
+    r = await t.call('GET', '/api/status');
+    assert.equal(/:\s*"secret"/.test(r.text), false, 'the token never goes back to the browser');
+
+    // Changing the address with the token left empty keeps the saved token.
+    r = await t.call('POST', '/api/setup', { url: t.ytUrl + '/issue/APP-1', token: '' });
+    assert.equal(r.status, 200, r.text);
+
+    // Disconnecting forgets the token and keeps the address.
+    await t.call('POST', '/api/disconnect');
+    const cfg = JSON.parse(fs.readFileSync(path.join(t.dataDir, 'config.json'), 'utf8'));
+    assert.deepEqual(cfg.trackerCreds, { url: t.ytUrl, token: '' });
+    r = await t.call('GET', '/api/status');
+    assert.equal(r.body.configured, false);
+    assert.equal(r.body.url, t.ytUrl);
+    r = await t.call('GET', '/api/week');
+    assert.equal(r.status, 409);
+    assert.match(r.body.error, /Connect YouTrack first/);
+  } finally {
+    await t.done();
+  }
+});
+
+// A tracker without work types or activity, the way Jira will be. It reuses the YouTrack
+// adapter and mock underneath, so only the capabilities differ.
+const { YouTrack } = require('../lib/youtrack');
+class PlainTracker extends YouTrack {
+  static id = 'plain';
+  static label = 'Plain';
+  static capabilities = { workTypes: false, activity: false };
+  links() { return { issue: this.base + '/browse/{key}', timesheets: null }; }
+}
+
+test('a tracker without work types or activity: no types anywhere, hints go in the note', async () => {
+  const mock = createMockYouTrack({ token: 'secret' });
+  const ytUrl = await mock.start();
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finito-test-'));
+  const app = createApp({ port: 0, dataDir, trackers: [YouTrack, PlainTracker] });
+  const port = await app.start();
+  const call = async (method, p, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: Object.assign({ 'x-finito': '1' }, body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
+    return { status: res.status, body: await res.json() };
+  };
+  try {
+    let r = await call('GET', '/api/status');
+    assert.deepEqual(r.body.trackers.map((t) => t.id), ['youtrack', 'plain']);
+    r = await call('POST', '/api/setup', { tracker: 'plain', url: ytUrl, token: 'secret' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.tracker, 'plain');
+
+    const today = D.localDate();
+    r = await call('GET', '/api/week');
+    assert.deepEqual(r.body.tracker, { id: 'plain', label: 'Plain', workTypes: false, activity: false, links: { issue: ytUrl + '/browse/{key}', timesheets: null } });
+    assert.ok(Object.values(r.body.projects).every((p) => p.types.length === 0), 'no types offered');
+
+    // The mock has activity; a tracker without activity doesn't ask for it, or for work types.
+    r = await call('GET', '/api/suggestions');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.suggestions.length, 0);
+    assert.equal(mock.state.calls.some((c) => /\/api\/activities|timeTracking(Settings|\/workItemTypes)/.test(c.path || c)), false, JSON.stringify(mock.state.calls));
+
+    r = await call('POST', '/api/entries', { issue: 'APP-1221', dates: [today], minutes: 30, typeHint: ['Meeting', 'Meetings'] });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.type, null);
+    r = await call('POST', '/api/entries', { issue: 'APP-1221', dates: [today], minutes: 15, type: 'Review' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /Plain has no work types/);
+
+    r = await call('GET', '/api/pending');
+    const [draft] = r.body.items;
+    assert.equal(draft.text, 'Meeting');
+    r = await call('POST', '/api/submit/' + encodeURIComponent(draft.key));
+    assert.equal(r.body.ok, true, JSON.stringify(r.body));
+    assert.equal(r.body.entry.type, null);
+    assert.equal(r.body.entry.text, 'Meeting');
+  } finally {
+    await app.stop();
+    await mock.stop();
   }
 });

@@ -466,18 +466,45 @@ function App() {
   return html`<${Main} status=${status} onReconnect=${onReconnect} onUnauthorized=${onUnauthorized} />`;
 }
 
+// The tracker the status points at, as /api/status describes it. Older servers sent no
+// description, so YouTrack is the fallback.
+const YOUTRACK_FORM = {
+  id: 'youtrack', label: 'YouTrack', help: null,
+  fields: [
+    { name: 'url', label: 'Address', placeholder: 'https://youtrack.example.com', required: true },
+    { name: 'token', label: 'Permanent token', placeholder: 'perm:…', secret: true, required: true },
+  ],
+};
+function trackerOf(status, id) {
+  const list = (status && status.trackers) || [];
+  return list.find((t) => t.id === (id || status.tracker)) || list[0] || YOUTRACK_FORM;
+}
+
+// The connected tracker, as /api/week describes it: its name, what it supports and where its
+// pages are. Set when the week loads; one page talks to one tracker.
+let TRACKER = { id: 'youtrack', label: 'YouTrack', workTypes: true, activity: true, links: { issue: null, timesheets: null } };
+const issueLink = (key) => (TRACKER.links.issue ? TRACKER.links.issue.replace('{key}', enc(key)) : null);
+
+// Help text marks what to click with **bold**.
+const boldParts = (text) => String(text).split(/\*\*(.+?)\*\*/g).map((part, i) => (i % 2 ? html`<b>${part}</b>` : part));
+
 function Setup({ status, canCancel, onCancel, onDone }) {
-  const [url, setUrl] = useState(status.url || '');
-  const [token, setToken] = useState('');
+  const [trackerId, setTrackerId] = useState(trackerOf(status).id);
+  const tracker = trackerOf(status, trackerId);
+  const [values, setValues] = useState(() => ({ url: status.url || '' }));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(status.ytStatus === 401 ? 'YouTrack no longer accepts the saved token. Paste a new one.' : status.error || '');
+  const [error, setError] = useState(status.ytStatus === 401 ? `${tracker.label} no longer accepts the saved token. Paste a new one.` : status.error || '');
+  const savedHere = status.configured && trackerId === status.tracker;
+  const set = (name, v) => setValues((x) => Object.assign({}, x, { [name]: v }));
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const r = await api('POST', '/setup', { url, token });
-      onDone({ configured: true, url: r.url, user: r.user });
+      const body = { tracker: tracker.id };
+      for (const f of tracker.fields) body[f.name] = values[f.name] || '';
+      const r = await api('POST', '/setup', body);
+      onDone(Object.assign({}, status, { configured: true, url: r.url, user: r.user, tracker: r.tracker || tracker.id, ytStatus: 0, error: '' }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -485,29 +512,29 @@ function Setup({ status, canCancel, onCancel, onDone }) {
     }
   };
   let origin = null;
+  const url = values.url || '';
   try { origin = new URL(/^https?:/i.test(url) ? url : 'https://' + url).origin; } catch (_) { /* not yet a URL */ }
+  const help = tracker.help;
+  const all = (status.trackers || []).length > 1 ? status.trackers : null;
   return html`<div class="setup-wrap">
     <${Glass} as="form" class="setup glass-strong" radius=${30} bezel=${22} scale=${26} blur=${12} onSubmit=${submit}>
       <${Mark} size=${40} />
-      <h1>Connect YouTrack</h1>
+      <h1>Connect ${tracker.label}</h1>
       <p class="sub">Finito runs on this computer and logs time as you. Your token stays here.</p>
-      <label class="field">
-        <span>Address</span>
-        <input id="url" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="https://youtrack.example.com" required />
-      </label>
-      <label class="field">
-        <span>Permanent token</span>
-        <input id="token" type="password" value=${token} onInput=${(e) => setToken(e.target.value)} placeholder=${status.configured ? 'Leave empty to keep the saved one' : 'perm:…'} autocomplete="off" />
-      </label>
-      <details class="howto">
-        <summary>Where do I get a token?</summary>
-        <ol>
-          <li>In YouTrack: your avatar → <b>Profile</b> → <b>Account Security</b>.</li>
-          <li><b>New token…</b>, name it “Finito”, scope <b>YouTrack</b>.</li>
-          <li>Copy it now (YouTrack shows it once) and paste it here.</li>
-        </ol>
-        ${origin ? html`<a href=${origin + '/users/me'} target="_blank" rel="noopener noreferrer">Open my YouTrack profile <${Icon} name="external" size=${12} /></a>` : null}
-      </details>
+      ${all ? html`<div class="field"><span id="tracker-label">Tracker</span>
+        <${Select} id="tracker" labelledBy="tracker-label" value=${trackerId} fill=${true}
+          options=${all.map((t) => ({ value: t.id, label: t.label }))} onChange=${(v) => { setTrackerId(v); setError(''); }} /></div>` : null}
+      ${tracker.fields.map((f) => html`<label class="field" key=${tracker.id + ':' + f.name}>
+        <span>${f.label}</span>
+        <input id=${f.name} type=${f.secret ? 'password' : 'text'} value=${values[f.name] || ''} onInput=${(e) => set(f.name, e.target.value)}
+          placeholder=${f.secret && savedHere ? 'Leave empty to keep the saved one' : f.placeholder}
+          required=${f.required && !f.secret} autocomplete="off" />
+      </label>`)}
+      ${help ? html`<details class="howto">
+        <summary>${help.title}</summary>
+        <ol>${help.steps.map((step, i) => html`<li key=${i}>${boldParts(step)}</li>`)}</ol>
+        ${help.link && (help.link.href || origin) ? html`<a href=${help.link.href || origin + help.link.path} target="_blank" rel="noopener noreferrer">${help.link.label} <${Icon} name="external" size=${12} /></a>` : null}
+      </details>` : null}
       ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
       <div class="actions">
         ${canCancel ? html`<button type="button" class="btn" onClick=${onCancel}>Cancel</button>` : null}
@@ -521,6 +548,7 @@ function Setup({ status, canCancel, onCancel, onDone }) {
 
 function Main({ status, onReconnect, onUnauthorized }) {
   const [week, setWeek] = useState(null);
+  if (week && week.tracker) TRACKER = week.tracker;
   const [loadError, setLoadError] = useState(null);
   const [mine, setMine] = useState([]);
   const [sugg, setSugg] = useState({ loading: true, items: [], unsorted: [], errors: [], monday: null });
@@ -586,7 +614,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
     api('GET', '/issues/mine').then((r) => setMine(r.issues || [])).catch(() => {});
   }, []);
 
-  // Coming back to the tab picks up what changed in YouTrack meanwhile.
+  // Coming back to the tab picks up what changed in the tracker meanwhile.
   useEffect(() => {
     const onVis = () => {
       const w = weekRef.current;
@@ -713,7 +741,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
   const projectOf = (id) => { const i = issueInfo(id); return i.project ? projects[i.project.shortName] || i.project : null; };
   const typesFor = (id) => { const p = projectOf(id); return p && Array.isArray(p.types) ? p.types : null; };
   const defaultTypeFor = (id) => { const p = projectOf(id); return p ? settings.typeDefaults[p.shortName] || null : null; };
-  const ytLink = (id) => `${week.url}/issue/${enc(id)}`;
+  const ytLink = (id) => issueLink(id) || `${week.url}/issue/${enc(id)}`;
 
   // ---- actions ----
   const reload = () => load(week.monday);
@@ -940,7 +968,10 @@ function Main({ status, onReconnect, onUnauthorized }) {
     }
 
     let typeErr = false;
-    if (issueOk) {
+    if (issueOk && !TRACKER.workTypes) {
+      // Typed out of habit: say why it's left out instead of blocking the entry.
+      if (parsed.type) tokens.push({ label: `#${parsed.type}`, sub: `${TRACKER.label} has no work types`, cls: 'warn' });
+    } else if (issueOk) {
       const types = typesFor(canonical);
       if (parsed.type) {
         const t = resolveTypeName(parsed.type, types);
@@ -1104,7 +1135,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
       week=${week} status=${status}
       onClose=${() => setSheet(null)}
       onSaved=${() => { setSheet(null); reload(); flash('Settings saved'); }}
-      onReload=${async () => { setSheet(null); await api('POST', '/refresh').catch(() => {}); await load(week.monday, true); loadSugg(week.monday); flash('Reloaded from YouTrack'); }}
+      onReload=${async () => { setSheet(null); await api('POST', '/refresh').catch(() => {}); await load(week.monday, true); loadSugg(week.monday); flash(`Reloaded from ${TRACKER.label}`); }}
       onReconnect=${() => { setSheet(null); onReconnect(); }}
       onSources=${() => loadSugg(week.monday)}
     />` : null}
@@ -1130,8 +1161,8 @@ function Hero({ total, target, range, pending, ytError, onRetry }) {
     </div>
     <div class="hero-meter" aria-hidden="true"><i style=${{ width: pct + '%' }}></i></div>
     ${ytError
-      ? html`<div class="hero-note warn"><${Icon} name="warn" size=${14} /> YouTrack didn't answer, so you see drafts only. <button class="link" onClick=${onRetry}>Try again</button></div>`
-      : !pending && total > 0 ? html`<div class="hero-note ok"><${Icon} name="check" size=${14} stroke=${2.4} /> All in YouTrack</div>` : null}
+      ? html`<div class="hero-note warn"><${Icon} name="warn" size=${14} /> ${TRACKER.label} didn't answer, so you see drafts only. <button class="link" onClick=${onRetry}>Try again</button></div>`
+      : !pending && total > 0 ? html`<div class="hero-note ok"><${Icon} name="check" size=${14} stroke=${2.4} /> All in ${TRACKER.label}</div>` : null}
   </section>`;
 }
 
@@ -1221,7 +1252,7 @@ function WeekGrid(p) {
           <${Icon} name=${timerHere ? 'stop' : 'play'} size=${12} />
         </button>
         <div class="imeta">
-          <a class="ikey" href=${ytLink(id)} target="_blank" rel="noopener noreferrer" title="Open in YouTrack">${id}</a>
+          <a class="ikey" href=${ytLink(id)} target="_blank" rel="noopener noreferrer" title=${`Open in ${TRACKER.label}`}>${id}</a>
           <span class="isum" title=${info.summary}>${info.summary || (info.missing ? "Can't open this issue" : '—')}</span>
         </div>
         ${removable ? html`<button class="row-x" aria-label=${`Remove ${id} from this week`} title="Remove row" onClick=${() => p.onRemoveRow(id)}><${Icon} name="x" size=${12} stroke=${2.2} /></button>` : null}
@@ -1519,7 +1550,7 @@ function Popover({ anchorId, onDismiss, onEscape, children, width = 340 }) {
     onKeyDown=${(e) => { if (e.key === 'Escape' && onEscape) { e.preventDefault(); onEscape(); } }}>${children}</div>`;
 }
 
-const STATUS_TEXT = { synced: 'In YouTrack', draft: 'Not sent yet', edited: 'Changed · not sent yet', deleted: 'Will be removed when you submit' };
+const STATUS_TEXT = { get synced() { return `In ${TRACKER.label}`; }, draft: 'Not sent yet', edited: 'Changed · not sent yet', deleted: 'Will be removed when you submit' };
 const BAD_TIME = 'Use 1.5, 1h30, 90m or 1:30.';
 
 function CellEditor(props) {
@@ -1849,7 +1880,7 @@ function Dock(p) {
             </button>`
           : html`<kbd class="dock-kbd" aria-hidden="true">/</kbd>`}
       <//>
-      ${pending ? html`<${Glass} as="button" class="submit" bezel=${16} scale=${30} sheen=${true} onClick=${p.onSubmitWeek} aria-label=${`Submit ${plural(pending, 'change', 'changes')} to YouTrack`}>
+      ${pending ? html`<${Glass} as="button" class="submit" bezel=${16} scale=${30} sheen=${true} onClick=${p.onSubmitWeek} aria-label=${`Submit ${plural(pending, 'change', 'changes')} to ${TRACKER.label}`}>
         <span class="submit-label">Submit</span> <span class="count">${pending}</span>
       <//>` : null}
     </div>
@@ -1964,22 +1995,22 @@ function SubmitSheet({ week, heads, target, timer, timerMin, typesFor, issueInfo
   const n = items.length;
   const minutes = items.filter((i) => i.change !== 'remove').reduce((a, i) => a + i.minutes, 0);
 
-  let title = 'Send to YouTrack';
+  let title = `Send to ${TRACKER.label}`;
   let sub = phase === 'review' ? (n ? `${plural(n, 'change', 'changes')} · ${fmt(minutes)}` : 'Nothing to send') : '';
   if (phase === 'writing') { title = 'Sending…'; sub = `${Math.min(idx + 1, n)} of ${n}`; }
-  if (phase === 'done') { title = failCount ? 'Sent, with problems' : 'Sent'; sub = failCount ? `${okCount} of ${n} in YouTrack` : `All ${plural(n, 'change', 'changes')} are in YouTrack`; }
+  if (phase === 'done') { title = failCount ? 'Sent, with problems' : 'Sent'; sub = failCount ? `${okCount} of ${n} in ${TRACKER.label}` : `All ${plural(n, 'change', 'changes')} are in ${TRACKER.label}`; }
 
   const footer = html`
     ${phase === 'review' ? html`<button class="btn btn-quiet" onClick=${onClose}>Not now</button><button class="btn btn-accent" onClick=${write} disabled=${!n}>Send ${plural(n, 'change', 'changes')}</button>` : null}
     ${phase === 'writing' ? html`<button class="btn btn-accent" disabled>Sending…</button>` : null}
-    ${phase === 'done' || phase === 'error' ? html`<a class="btn btn-quiet" href=${week.url + '/timesheets'} target="_blank" rel="noopener noreferrer">YouTrack timesheets <${Icon} name="external" size=${12} /></a><button class="btn btn-accent" onClick=${onClose}>Done</button>` : null}`;
+    ${phase === 'done' || phase === 'error' ? html`${TRACKER.links.timesheets ? html`<a class="btn btn-quiet" href=${TRACKER.links.timesheets} target="_blank" rel="noopener noreferrer">${TRACKER.label} timesheets <${Icon} name="external" size=${12} /></a>` : null}<button class="btn btn-accent" onClick=${onClose}>Done</button>` : null}`;
 
   return html`<${Sheet} title=${title} sub=${sub} onClose=${onClose} canClose=${phase !== 'writing'} footer=${footer} wide>
     ${phase === 'loading' ? html`<div class="pad center"><span class="spinner"></span></div>` : null}
     ${phase === 'error' ? html`<p class="err-line">${st.error}</p>` : null}
     ${phase === 'done' ? html`<div class=${'donebox' + (failCount ? ' warn' : '')}>
       <span class="done-ic"><${Icon} name=${failCount ? 'warn' : 'check'} size=${18} stroke=${2.4} /></span>
-      <div>${failCount ? 'Failed changes stay here with the reason. Fix them and send again.' : 'Your week is in YouTrack.'}${retried ? ` ${plural(retried, 'write was', 'writes were')} retried after a network error, without duplicates.` : ''}</div>
+      <div>${failCount ? 'Failed changes stay here with the reason. Fix them and send again.' : `Your week is in ${TRACKER.label}.`}${retried ? ` ${plural(retried, 'write was', 'writes were')} retried after a network error, without duplicates.` : ''}</div>
     </div>` : null}
     ${phase === 'writing' ? html`<div class="progress"><i style=${{ width: Math.round((Math.min(idx, n) / Math.max(1, n)) * 100) + '%' }}></i></div>` : null}
     ${checks.length ? html`<div class="checks">${checks.map((c, i) => html`<div class=${'check c-' + c.kind} key=${i}>
@@ -2001,7 +2032,7 @@ function SubmitSheet({ week, heads, target, timer, timerMin, typesFor, issueInfo
           <span class="change-main">
             <span class="ell"><span class="mono">${it.issue}</span> <span class="muted">${it.text || summary}</span></span>
             ${state === 'failed' ? html`<span class="err-text">${r.error}</span>` : !r && it.error ? html`<span class="err-text">Last time: ${it.error}</span>` : null}
-            ${r && r.dropped ? html`<span class="muted small">Already deleted in YouTrack, so the edit was dropped</span>` : null}
+            ${r && r.dropped ? html`<span class="muted small">Already deleted in ${TRACKER.label}, so the edit was dropped</span>` : null}
           </span>
           <span class="change-day">${shortDay(it.date)}</span>
           <span class="change-min">${it.change === 'remove' ? html`<s>${fmt(it.minutes)}</s>` : fmt(it.minutes)}</span>
@@ -2012,8 +2043,8 @@ function SubmitSheet({ week, heads, target, timer, timerMin, typesFor, issueInfo
   <//>`;
 }
 
-// Where suggestions come from besides YouTrack: a calendar and GitHub. Connecting saves at
-// once (like Change for YouTrack), apart from the sheet's Save.
+// Where suggestions come from besides the tracker: a calendar and GitHub. Connecting saves at
+// once (like Change for the tracker), apart from the sheet's Save.
 const SOURCE_TEXT = {
   calendar: {
     name: 'Calendar',
@@ -2096,7 +2127,7 @@ function SourcesGroup({ onChanged }) {
   const maps = (src && src.mappings) || [];
   return html`<div class="group">
     <div class="group-title">Suggestions from</div>
-    <div class="srow account"><span>YouTrack activity<span class="muted small block">Comments, field changes, commits and more</span></span><span class="muted small">Always</span></div>
+    ${TRACKER.activity ? html`<div class="srow account"><span>${TRACKER.label} activity<span class="muted small block">Comments, field changes, commits and more</span></span><span class="muted small">Always</span></div>` : null}
     ${row('calendar')}
     ${row('github')}
     ${maps.length ? html`<div class="srow remembered">
@@ -2126,7 +2157,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect, 
   const themeKept = useRef(false);
   useEffect(() => () => { if (!themeKept.current) showTheme(themeBefore.current); }, []);
   const projectList = Object.values(week.projects).filter((p) => (p.types || []).length);
-  for (const k of Object.keys(s.typeDefaults)) if (!week.projects[k]) projectList.push({ shortName: k, name: k, types: [s.typeDefaults[k]], unknown: true });
+  if (TRACKER.workTypes) for (const k of Object.keys(s.typeDefaults)) if (!week.projects[k]) projectList.push({ shortName: k, name: k, types: [s.typeDefaults[k]], unknown: true });
   const DAYS = [[1, 'M', 'Monday'], [2, 'T', 'Tuesday'], [3, 'W', 'Wednesday'], [4, 'T', 'Thursday'], [5, 'F', 'Friday'], [6, 'S', 'Saturday'], [0, 'S', 'Sunday']];
   const save = async () => {
     const mins = parseDuration(target);
@@ -2162,7 +2193,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect, 
         <${Select} id="s-round" labelledBy="s-round-label" value=${rounding} minWidth=${120} align="end" onChange=${setRounding}
           options=${['1', '5', '10', '15', '30'].map((v) => ({ value: v, label: v === '1' ? 'the minute' : v + ' min' }))} /></div>
     </div>
-    <div class="group">
+    ${TRACKER.workTypes ? html`<div class="group">
       <div class="group-title">Default work type</div>
       ${projectList.length ? projectList.map((p) => html`<div class="srow" key=${p.shortName}>
         <span id=${'t-' + p.shortName + '-label'}><span class="mono">${p.shortName}</span>${p.name && p.name !== p.shortName ? html` <span class="muted small">${p.name}</span>` : null}</span>
@@ -2170,7 +2201,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect, 
           options=${[{ value: '', label: 'None' }, ...(p.types || []).map((t) => ({ value: t, label: t }))]}
           onChange=${(v) => setDefs(Object.assign({}, defs, { [p.shortName]: v }))} />
       </div>`) : html`<div class="srow muted small">Projects appear here once you've logged on them.</div>`}
-    </div>
+    </div>` : null}
     <${SourcesGroup} onChanged=${onSources || (() => {})} />
     <div class="group">
       <div class="group-title">Appearance</div>
@@ -2180,7 +2211,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect, 
           options=${[{ value: 'system', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} /></div>
     </div>
     <div class="group">
-      <div class="group-title">YouTrack</div>
+      <div class="group-title">${trackerOf(status).label}</div>
       <div class="srow account"><span>${status.user ? status.user.fullName || status.user.login : 'Connected'}<span class="muted small block">${host}</span></span>
         <span class="srow-acts"><button class="btn btn-sm" onClick=${onReload}>Reload</button><button class="btn btn-sm" onClick=${onReconnect}>Change</button></span></div>
     </div>
