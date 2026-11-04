@@ -141,6 +141,19 @@ const RESULTS_MAX = 212;
 const QUARTERS = Array.from({ length: 96 }, (_, i) => pad(Math.floor(i / 4)) + ':' + pad((i % 4) * 15));
 let selectCount = 0;
 
+// A touch screen (a phone, a tablet without a mouse) gets the platform's own pickers.
+const TOUCH = window.matchMedia ? window.matchMedia('(hover: none) and (pointer: coarse)') : null;
+function useTouch() {
+  const [on, setOn] = useState(() => !!(TOUCH && TOUCH.matches));
+  useEffect(() => {
+    if (!TOUCH) return undefined;
+    const f = () => setOn(TOUCH.matches);
+    if (TOUCH.addEventListener) TOUCH.addEventListener('change', f); else TOUCH.addListener(f);
+    return () => { if (TOUCH.removeEventListener) TOUCH.removeEventListener('change', f); else TOUCH.removeListener(f); };
+  }, []);
+  return on;
+}
+
 // Renders its children into a layer on <body>.
 function Layer({ children }) {
   const host = useRef(null);
@@ -158,6 +171,7 @@ function Layer({ children }) {
 }
 
 function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill', fill = false, align = 'auto', minWidth = 0, maxListHeight = 296 }) {
+  const native = useTouch();
   const [uid] = useState(() => id || 'sel-' + (++selectCount));
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(false); // the surface exists, also while it folds back
@@ -187,7 +201,7 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
     // offsetWidth, not getBoundingClientRect: a sheet still rising (scaled) would measure short and clip the label.
     const m = t.querySelector('.sel-measure').offsetWidth + 1;
     t.style.width = Math.max(minWidth, Math.ceil(m + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight))) + 'px';
-  }, [cur.label, minWidth, fill]);
+  }, [cur.label, minWidth, fill, native]);
 
   const measure = () => {
     const t = trig.current;
@@ -385,6 +399,21 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
 
   const listId = uid + '-list';
   const chevron = html`<span class="sel-chev"><${Icon} name="chevron" size=${16} stroke=${1.75} /></span>`;
+  // Touch: a real <select> takes the tap and opens the platform's picker (the wheel on an iPhone, a list on
+  // Android); the trigger under it is only the look, sized and rolling as above.
+  if (native) {
+    return html`<span class=${'sel native' + (fill ? ' fill' : '')}>
+      <select id=${uid} class="sel-native" value=${cur.value}
+        aria-labelledby=${labelledBy || undefined} aria-label=${labelledBy ? undefined : label}
+        onChange=${(e) => { const o = options.find((x) => x.value === e.target.value); if (o && !o.disabled && o.value !== value) onChange(o.value); }}>
+        ${options.map((o) => html`<option key=${o.value} value=${o.value} disabled=${!!o.disabled} selected=${o.value === cur.value}>${o.meta ? `${o.label} (${o.meta})` : o.label}</option>`)}
+      </select>
+      <span ref=${trig} class=${'sel-trigger' + (shape === 'field' ? ' sel-field' : '')} aria-hidden="true">
+        <span class="sel-measure">${cur.label}</span>
+        <span key=${cur.value} class=${'sel-value' + roll}>${cur.label}</span>${chevron}
+      </span>
+    </span>`;
+  }
   const surface = shown ? html`<${Layer}>
     <div ref=${surf} class=${'glass glass-strong sel-surface' + (shape === 'field' ? ' sel-field' : '')}>
       <div class="sel-head" aria-hidden="true" onPointerDown=${(e) => e.preventDefault()} onClick=${() => setOpen(false)}>
@@ -1034,7 +1063,7 @@ function Main({ status, onReconnect, onUnauthorized }) {
 
       <section class="paper" aria-label="Week">
         <${WeekGrid}
-          cols=${cols} heads=${heads} today=${today} rowIds=${rowIds} ghostIds=${ghostIds}
+          monday=${week.monday} cols=${cols} heads=${heads} today=${today} rowIds=${rowIds} ghostIds=${ghostIds}
           isWorkDay=${isWorkDay} cellEntries=${cellEntries} liveOf=${liveOf} sum=${sum} runningOn=${runningOn}
           issueInfo=${issueInfo} ytLink=${ytLink} timer=${timer}
           suggAt=${suggAt} suggestions=${suggestions} edit=${edit} rows=${week.rows}
@@ -1141,6 +1170,19 @@ function WeekGrid(p) {
   const { cols, heads, today, rowIds, ghostIds, isWorkDay, cellEntries, liveOf, sum, issueInfo, ytLink, timer, runningOn, suggAt, suggestions, edit } = p;
   const unsorted = p.unsorted || [];
   const [picking, setPicking] = useState(null);
+  // On a phone the week is wider than the screen: a week opens at its start, or with today in view.
+  const scroller = useRef(null);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollLeft = 0;
+    const head = el.querySelector('.dh.st-today');
+    if (!head) return;
+    const over = head.getBoundingClientRect().right - el.getBoundingClientRect().right;
+    if (over > 0) el.scrollLeft = Math.ceil(over);
+  }, [p.monday]);
+  // Marks a week moved sideways, so the pinned issue column can show its edge.
+  const onScroll = (e) => e.currentTarget.toggleAttribute('data-scrolled', e.currentTarget.scrollLeft > 1);
   // A busy calendar shouldn't bury the week: the longest few show, the rest on request.
   const [allSort, setAllSort] = useState(false);
   const SORT_SHOWN = 5;
@@ -1265,7 +1307,7 @@ function WeekGrid(p) {
     </div>`;
   };
 
-  return html`<div class="wgrid-scroll">
+  return html`<div class="wgrid-scroll" ref=${scroller} onScroll=${onScroll}>
     <div class="wgrid" role="grid" aria-label="Time per issue and day" style=${template}>
       <div class="wrow ghead" role="row">
         <div class="hcell" role="columnheader"><span class="sr">Issue</span></div>
@@ -1478,7 +1520,11 @@ function Popover({ anchorId, onDismiss, onEscape, children, width = 340 }) {
     left = Math.round(Math.max(12, Math.min(left, window.innerWidth - w - 12)));
     let top = r.bottom + 8;
     let below = true;
-    if (top + h > window.innerHeight - dock && r.top - h - 8 > 12) { top = r.top - h - 8; below = false; }
+    if (top + h > window.innerHeight - dock) {
+      if (r.top - h - 8 > 12) { top = r.top - h - 8; below = false; }
+      // A short screen with room on neither side: it stays whole on screen, over the bar if it has to.
+      else top = Math.min(top, window.innerHeight - h - 12);
+    }
     const next = { left, top: Math.round(Math.max(12, top)), w, below, ox: Math.round(r.left + r.width / 2 - left) };
     const prev = posRef.current;
     if (prev && prev.left === next.left && prev.top === next.top && prev.w === next.w && prev.below === next.below) return;
@@ -1488,6 +1534,17 @@ function Popover({ anchorId, onDismiss, onEscape, children, width = 340 }) {
   // Re-place after every render: the cell can move when the week around it changes.
   useLayoutEffect(place);
   useLayoutEffect(() => {
+    // On a phone the editor can fit neither under nor over its cell: bring the cell up toward the top bar first.
+    const a = document.getElementById(anchorId);
+    if (a && ref.current) {
+      const r = a.getBoundingClientRect();
+      const h = ref.current.offsetHeight;
+      const room = window.innerHeight - DOCK_ROOM;
+      if (r.bottom + 8 + h > room && r.top - h - 8 <= 12) {
+        const by = Math.min(r.bottom + 8 + h - room, r.top - TOP_ROOM);
+        if (by > 0) { window.scrollBy(0, by); place(); }
+      }
+    }
     const onMove = () => requestAnimationFrame(place);
     window.addEventListener('resize', onMove);
     window.addEventListener('scroll', onMove, true);
@@ -1823,7 +1880,7 @@ function Dock(p) {
   const label = action === 'start' ? 'Start' : 'Log';
   return html`<footer class="dock-wrap">
     ${q.trim() ? html`<div class="preview glass glass-strong" aria-live="polite">
-      ${tokens.map((t, i) => html`<span key=${i} class=${'tok ' + t.cls}>${t.mono ? html`<span class="mono">${t.label}</span>` : t.label}${t.sub ? html`<span class="tok-sub">${t.sub}</span>` : null}</span>`)}
+      ${tokens.map((t, i) => html`<span key=${i} class=${'tok ' + t.cls}><span class=${'tok-label' + (t.mono ? ' mono' : '')}>${t.label}</span>${t.sub ? html`<span class="tok-sub">${t.sub}</span>` : null}</span>`)}
     </div>` : null}
     ${p.timerPop && timer ? html`<${TimerPop} ...${p} />` : null}
     <div class="dock-row">
@@ -1883,6 +1940,12 @@ function TimerPop(p) {
 
 function Sheet({ title, sub, onClose, canClose = true, children, footer, wide }) {
   const ref = useRef(null);
+  // On a touch screen the page behind stays put while a sheet is open (see .sheet-open in app.css).
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.classList.add('sheet-open');
+    return () => root.classList.remove('sheet-open');
+  }, []);
   useLayoutEffect(() => {
     const prev = document.activeElement;
     if (ref.current) ref.current.focus();
@@ -2151,7 +2214,7 @@ function SettingsSheet({ week, status, onClose, onSaved, onReload, onReconnect, 
     <div class="group">
       <div class="group-title">Week</div>
       <label class="srow"><span>Daily target</span><input id="s-target" class="in-sm" value=${target} onInput=${(e) => setTarget(e.target.value)} /></label>
-      <div class="srow"><span>Work days</span>
+      <div class="srow days"><span>Work days</span>
         <div class="daypick" role="group" aria-label="Work days">${DAYS.map(([n, l, full]) => html`<button key=${n} type="button" class=${'daybtn' + (workDays.includes(n) ? ' on' : '')} aria-pressed=${workDays.includes(n)} aria-label=${full}
           onClick=${() => setWorkDays(workDays.includes(n) ? workDays.filter((x) => x !== n) : [...workDays, n])}>${l}</button>`)}</div>
       </div>

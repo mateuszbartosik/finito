@@ -139,7 +139,8 @@ export function parseQuick(raw, { dates, today, issues = [] }) {
   }
   if (!r.dates) {
     if (dates.includes(today)) r.dates = [today];
-    else r.dayError = 'Which day? Add mon…sun, today or yesterday.';
+    // Shown after "Which day?", like "an ID or words from its title" after "Which issue?".
+    else r.dayError = 'add mon…sun, today or yesterday';
   }
 
   m = rest.match(/\s#([^\s#]+)(?=\s)/);

@@ -29,6 +29,9 @@
 
   --wall: #e6eaf3;
   --paper: rgb(255 255 255 / 0.8);
+  /* the paper as it looks over the wallpaper, as one solid colour: what it turns into on a phone */
+  --paper-flat: #fafbfe;
+  --pin-shade: rgb(16 24 40 / 0.06);
   --paper-solid: #ffffff;
   --paper-rim: rgb(255 255 255 / 0.95);
   --glass: rgb(255 255 255 / 0.26);
@@ -81,6 +84,8 @@
 
     --wall: #070910;
     --paper: rgb(17 20 30 / 0.74);
+    --paper-flat: #0e111a;
+    --pin-shade: rgb(0 0 0 / 0.34);
     --paper-solid: #141824;
     --paper-rim: rgb(255 255 255 / 0.09);
     --glass: rgb(255 255 255 / 0.06);
@@ -126,6 +131,8 @@
 
   --wall: #070910;
   --paper: rgb(17 20 30 / 0.74);
+  --paper-flat: #0e111a;
+  --pin-shade: rgb(0 0 0 / 0.34);
   --paper-solid: #141824;
   --paper-rim: rgb(255 255 255 / 0.09);
   --glass: rgb(255 255 255 / 0.06);
@@ -280,12 +287,12 @@ kbd { font-family: var(--mono); }
   letter-spacing: -0.01em;
   transition: background 0.2s var(--ease);
 }
-.seg-btn:hover:not(:disabled) { background: var(--glass-hover); }
+@media (hover: hover) { .seg-btn:hover:not(:disabled) { background: var(--glass-hover); } }
 .seg-btn:active:not(:disabled) { transform: scale(0.96); }
 .seg-label { padding: 0 12px; min-width: 104px; }
 .seg-label:disabled { opacity: 1; }
 .round { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; transition: transform 0.2s var(--spring); }
-.round:hover { transform: rotate(18deg); }
+@media (hover: hover) { .round:hover { transform: rotate(18deg); } }
 
 /* ---------- hero ---------- */
 
@@ -322,16 +329,20 @@ kbd { font-family: var(--mono); }
 .wgrid { min-width: var(--min); --sugg-in: 6px; }
 .wrow { position: relative; display: grid; grid-template-columns: var(--cols); min-height: 56px; border-radius: 18px; }
 .wrow + .wrow::before { content: ""; position: absolute; left: 14px; right: 14px; top: 0; height: 1px; background: var(--hair); }
-.wrow:hover + .wrow::before, .wrow.ghead + .wrow::before, .wrow.section + .wrow::before, .wrow.section::before { opacity: 0; }
-/* :where keeps this low in specificity, so a section (the suggestions panel) can tint its own rows */
-.wrow:where(:not(.ghead, .section, .addline)):hover { background: var(--field); }
-.wrow:where(:not(.ghead, .section, .addline)):hover::before { opacity: 0; }
+.wrow.ghead + .wrow::before, .wrow.section + .wrow::before, .wrow.section::before { opacity: 0; }
+/* Hover only where something can hover: on a touch screen it would stay on the row you last tapped. */
+@media (hover: hover) {
+  .wrow:hover + .wrow::before { opacity: 0; }
+  /* :where keeps this low in specificity, so a section (the suggestions panel) can tint its own rows */
+  .wrow:where(:not(.ghead, .section, .addline)):hover { background: var(--field); }
+  .wrow:where(:not(.ghead, .section, .addline)):hover::before { opacity: 0; }
+}
 
 .ghead { min-height: 70px; }
 .hcell { display: flex; align-items: flex-end; padding: 0 16px 12px; font-size: 12px; color: var(--ink-3); }
 .hcell.end { justify-content: flex-end; }
 .dh { display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 5px; padding: 10px 12px 12px; text-align: center; }
-.dh-name { font-size: 12.5px; color: var(--ink-3); }
+.dh-name { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
 .dh-name span { color: var(--ink); font-weight: 560; }
 .dh-total { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; display: inline-flex; justify-content: center; align-items: center; gap: 3px; }
 .meter { height: 4px; border-radius: 99px; background: var(--hair-2); overflow: hidden; }
@@ -359,7 +370,7 @@ kbd { font-family: var(--mono); }
   transition: opacity 0.15s, transform 0.2s var(--spring), background 0.15s, color 0.15s;
 }
 .wrow:hover .play, .play:focus-visible, .play.on { opacity: 1; transform: none; }
-.play:hover { background: var(--accent-soft); color: var(--accent-ink); }
+@media (hover: hover) { .play:hover { background: var(--accent-soft); color: var(--accent-ink); } }
 .play.on { color: #fff; background: var(--accent-fill); box-shadow: 0 0 0 4px var(--accent-soft); }
 .imeta { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .ikey { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); text-decoration: none; letter-spacing: -0.01em; width: fit-content; }
@@ -367,7 +378,7 @@ kbd { font-family: var(--mono); }
 .isum { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-x { margin-left: auto; width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; color: var(--ink-3); opacity: 0; transition: opacity 0.15s; }
 .wrow:hover .row-x, .row-x:focus-visible { opacity: 1; }
-.row-x:hover { background: var(--hair-2); color: var(--ink); }
+@media (hover: hover) { .row-x:hover { background: var(--hair-2); color: var(--ink); } }
 @media (hover: none) { .row-x { opacity: 1; } }
 .wrow.timing .isum { color: var(--accent-ink); }
 
@@ -385,11 +396,12 @@ kbd { font-family: var(--mono); }
   font-variant-numeric: tabular-nums;
   transition: background 0.15s, box-shadow 0.2s var(--ease), transform 0.15s;
 }
-.cbtn:hover { background: var(--field); }
+@media (hover: hover) { .cbtn:hover { background: var(--field); } }
 .cbtn:active { transform: scale(0.97); }
 .cbtn:focus-visible { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--accent); }
 .cbtn .plus { color: var(--ink-4); font-size: 17px; font-weight: 300; opacity: 0; transition: opacity 0.15s; }
-.cbtn:hover .plus, .cbtn:focus-visible .plus { opacity: 1; }
+.cbtn:focus-visible .plus { opacity: 1; }
+@media (hover: hover) { .cbtn:hover .plus { opacity: 1; } }
 .cbtn.pending .v { color: var(--accent-ink); font-weight: 560; }
 .cbtn.removed .v { text-decoration: line-through; color: var(--ink-3); }
 .cbtn.quiet .v { color: var(--ink-2); }
@@ -415,7 +427,7 @@ kbd { font-family: var(--mono); }
   border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
   transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
-.ghost:hover { background: var(--accent-soft); border-style: solid; }
+@media (hover: hover) { .ghost:hover { background: var(--accent-soft); border-style: solid; } }
 .ghost:active { transform: scale(0.96); }
 .ghost-x {
   position: absolute;
@@ -451,15 +463,16 @@ kbd { font-family: var(--mono); }
 /* a dashed slot where the next row goes, so it reads as part of the table rather than floating */
 .add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 44px; padding: 0 16px; border: 1.5px dashed var(--ink-4); border-radius: 16px; color: var(--ink-2); font-size: 13.5px; font-weight: 500; transition: background 0.15s, color 0.15s, border-color 0.15s; }
 .add-btn .icon { flex: none; }
-.add-btn:hover { background: color-mix(in oklab, var(--accent) 6%, transparent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); color: var(--accent-ink); }
+@media (hover: hover) { .add-btn:hover { background: color-mix(in oklab, var(--accent) 6%, transparent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); color: var(--accent-ink); } }
 .add-btn:focus-visible { outline: 2px solid transparent; box-shadow: inset 0 0 0 2px var(--accent); }
 .addissue { text-align: left; }
 /* suggestions stand apart from the week: their own tinted panel, still on the day columns */
-.sugg { margin: 16px 0 2px; padding-bottom: var(--sugg-in); border-radius: 18px; background: color-mix(in oklab, var(--accent) 5%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 16%, transparent); }
+.sugg { --sugg-tint: color-mix(in oklab, var(--accent) 5%, transparent); margin: 16px 0 2px; padding-bottom: var(--sugg-in); border-radius: 18px; background: var(--sugg-tint); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 16%, transparent); }
 /* its rows sit inset, so a hovered row keeps clear of the panel's edge; the paddings give the inset back, so text lines up with the week */
 .sugg .wrow { margin: 0 var(--sugg-in); border-radius: calc(18px - var(--sugg-in)); grid-template-columns: var(--cols-in); }
 .sugg .wrow + .wrow::before { left: calc(14px - var(--sugg-in)); right: calc(14px - var(--sugg-in)); }
-.sugg .wrow.section { min-height: 44px; padding: 10px calc(14px - var(--sugg-in)) 0 calc(10px - var(--sugg-in)); }
+/* the panel's headings (and Add all) stay on the visible part of the week when it scrolls sideways, like Add issue */
+.sugg .wrow.section { position: sticky; left: var(--sugg-in); width: calc(100cqw - 2 * var(--sugg-in)); min-height: 44px; padding: 10px calc(14px - var(--sugg-in)) 0 calc(10px - var(--sugg-in)); }
 .sugg .issue { padding-left: calc(10px - var(--sugg-in)); }
 .sugg .rtotal { padding-right: calc(18px - var(--sugg-in)); }
 /* meetings and reviews that name no issue: same columns, a quieter value, a way to choose */
@@ -470,17 +483,17 @@ kbd { font-family: var(--mono); }
 .src-icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; color: var(--ink-3); }
 .sort-row .ikey { color: var(--ink-3); }
 .pick-btn { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 26px; margin-left: auto; padding: 0 10px 0 8px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: var(--accent-ink); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent); transition: background 0.15s; }
-.pick-btn:hover { background: var(--accent-soft); }
+@media (hover: hover) { .pick-btn:hover { background: var(--accent-soft); } }
 .pick-btn:focus-visible { outline: 2px solid transparent; box-shadow: inset 0 0 0 2px var(--accent); }
 .sort-row .pick-btn + .row-x { margin-left: 0; }
 .ghost.sort { color: var(--ink-2); border-color: var(--ink-4); }
-.ghost.sort:hover { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+@media (hover: hover) { .ghost.sort:hover { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 50%, transparent); } }
 .sort-row.picking .issue { gap: 6px; }
 .addissue.compact { flex: 1; min-width: 0; }
 .addissue.compact .addissue-field { height: 38px; padding: 0 10px 0 12px; border-radius: 13px; }
 .addissue.compact .addissue-field input { font-size: 13.5px; }
 /* hover deepens the panel's own tint instead of turning grey */
-.sugg .wrow.ghost-row:hover { background: var(--accent-wash); }
+@media (hover: hover) { .sugg .wrow.ghost-row:hover { background: var(--accent-wash); } }
 .addissue-field { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 6px 0 14px; border-radius: 16px; background: var(--paper-solid); box-shadow: inset 0 0 0 2px var(--accent), 0 8px 20px -10px var(--accent-glow); color: var(--ink-3); }
 .addissue-field input { flex: 1; min-width: 0; border: 0; background: none; outline: 2px solid transparent; font-size: 14.5px; color: var(--ink); }
 /* about five rows, then it scrolls; the edge that hides more fades out */
@@ -552,6 +565,10 @@ kbd { font-family: var(--mono); }
 @keyframes sel-roll-up { from { opacity: 0; transform: translateY(65%); } }
 @keyframes sel-roll-down { from { opacity: 0; transform: translateY(-65%); } }
 .sel-chev { position: absolute; top: 50%; right: 12px; display: flex; width: 16px; height: 16px; margin-top: -8px; color: var(--ink-3); transition: transform 0.3s var(--ease-settle); }
+/* On a touch screen the platform's own picker opens instead (the wheel on an iPhone): a real <select> lies
+   over the trigger, invisible, and takes the tap. At 16px iOS doesn't zoom in when it gets focus. */
+.sel-native { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; font: inherit; font-size: 16px; color: transparent; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.sel-native:focus + .sel-trigger { box-shadow: inset 0 0 0 2px var(--accent); }
 
 .sel-layer { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
 .glass.sel-surface {
@@ -723,7 +740,7 @@ kbd { font-family: var(--mono); }
 .chip-clock { font-size: 15px; font-weight: 620; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .chip-issue { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: 0.9; }
 .chip-stop { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: rgb(255 255 255 / 0.22); transition: background 0.15s; }
-.chip-stop:hover { background: rgb(255 255 255 / 0.34); }
+@media (hover: hover) { .chip-stop:hover { background: rgb(255 255 255 / 0.34); } }
 .chip.long { color: #2b1700; background: var(--warn-fill); }
 .chip.long .pulse { background: #2b1700; }
 .chip.long .chip-stop { color: inherit; background: rgb(0 0 0 / 0.12); }
@@ -743,7 +760,7 @@ kbd { font-family: var(--mono); }
   animation: rise 0.36s var(--spring);
   transition: transform 0.2s var(--spring), background 0.2s;
 }
-.glass.submit:hover { transform: translateY(-1px) scale(1.02); background: var(--accent-fill); }
+@media (hover: hover) { .glass.submit:hover { transform: translateY(-1px) scale(1.02); background: var(--accent-fill); } }
 .glass.submit:active { transform: scale(0.97); }
 .submit .count { min-width: 30px; height: 30px; padding: 0 9px; border-radius: 99px; display: grid; place-items: center; font-variant-numeric: tabular-nums; background: rgb(255 255 255 / 0.24); }
 
@@ -759,8 +776,10 @@ kbd { font-family: var(--mono); }
   font-size: 13px;
   animation: rise 0.22s var(--spring);
 }
-.tok { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
-.tok-sub { color: var(--ink-3); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a token keeps its label whole; what's after it gives way first, with an ellipsis */
+.tok { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
+.tok-label { flex: none; white-space: nowrap; }
+.tok-sub { min-width: 0; color: var(--ink-3); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tok.issue .mono { font-weight: 600; }
 .tok.ok { color: var(--accent-ink); font-weight: 620; }
 .tok.err { color: var(--danger); }
@@ -793,28 +812,31 @@ kbd { font-family: var(--mono); }
   box-shadow: inset 0 0 0 1px var(--hair);
   transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
 }
-.btn:hover { background: var(--hair-2); }
+@media (hover: hover) { .btn:hover { background: var(--hair-2); } }
 .btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.45; }
 .btn-accent { color: #fff; background: var(--accent-fill); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.24), 0 8px 18px -10px var(--accent-glow); }
-.btn-accent:hover { background: color-mix(in srgb, var(--accent-fill) 88%, #000); }
+@media (hover: hover) { .btn-accent:hover { background: color-mix(in srgb, var(--accent-fill) 88%, #000); } }
 .btn-quiet { color: var(--ink-2); background: transparent; box-shadow: none; }
-.btn-quiet:hover { color: var(--ink); background: var(--field); }
+@media (hover: hover) { .btn-quiet:hover { color: var(--ink); background: var(--field); } }
 .btn-sm { height: 31px; padding: 0 12px; font-size: 12.5px; }
 .danger { color: var(--danger); }
-.btn.danger:hover { background: var(--danger-soft); }
+@media (hover: hover) { .btn.danger:hover { background: var(--danger-soft); } }
 .icon-btn { width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); transition: background 0.15s, color 0.15s; }
-.icon-btn:hover { color: var(--ink); background: var(--hair-2); }
+@media (hover: hover) { .icon-btn:hover { color: var(--ink); background: var(--hair-2); } }
 .link { color: var(--accent-ink); font-weight: 560; }
 .link:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------- sheets ---------- */
 
+/* One cell the size of the screen (less the padding): the sheet centres in it and can't grow past it, however
+   wide its contents. On a phone that's the visible part of the screen, between Safari's bars. */
 .scrim {
   position: fixed;
   inset: 0;
   z-index: 50;
   display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   padding: 20px;
   background: rgb(10 14 24 / 0.16);
@@ -822,12 +844,12 @@ kbd { font-family: var(--mono); }
   backdrop-filter: blur(8px) saturate(120%);
   animation: fade 0.2s ease;
 }
-.sheet { width: min(480px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; border-radius: 32px; outline: none; animation: rise 0.34s var(--spring); }
+.sheet { width: min(480px, 100%); max-height: 100%; display: flex; flex-direction: column; border-radius: 32px; outline: none; animation: rise 0.34s var(--spring); }
 .sheet.wide { width: min(700px, 100%); }
 .sheet-head { display: flex; align-items: flex-start; gap: 12px; padding: 24px 20px 8px 26px; }
 .sheet-head h2 { margin: 0; font-size: 21px; font-weight: 620; letter-spacing: -0.025em; }
 .sheet-sub { margin-top: 3px; font-size: 13.5px; color: var(--ink-2); }
-.sheet-body { display: flex; flex-direction: column; gap: 14px; padding: 8px 24px 8px; overflow: auto; }
+.sheet-body { display: flex; flex-direction: column; gap: 14px; padding: 8px 24px 8px; overflow: auto; overscroll-behavior: contain; }
 .sheet-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 20px; }
 
 /* 4px at the bottom gives the last row the same 12px to the edge as the title has at the top */
@@ -956,30 +978,52 @@ kbd { font-family: var(--mono); }
   .page { padding: 76px 10px 156px; }
   .top { padding: 12px; }
   .hero { padding: 4px 8px 20px; }
-  .paper { padding: 4px; border-radius: 24px; }
-  .wgrid { --issue-w: 138px; --day-w: 68px; --total-w: 64px; }
-  .issue { position: sticky; left: 0; z-index: 2; padding-left: 12px; background: color-mix(in srgb, var(--paper-solid) 92%, transparent); }
-  /* the same base as other pinned cells, plus the panel's own wash */
-  .sugg .issue { padding-left: calc(12px - var(--sugg-in)); border-radius: calc(18px - var(--sugg-in)) 0 0 calc(18px - var(--sugg-in)); background: linear-gradient(color-mix(in oklab, var(--accent) 5%, transparent), color-mix(in oklab, var(--accent) 5%, transparent)), color-mix(in srgb, var(--paper-solid) 92%, transparent); }
+  /* The week scrolls sideways under a pinned issue column. The paper turns solid here, in the colour it has as
+     glass, so the column can be exactly the paper and hide the days passing under it. */
+  .paper { --pin: var(--paper-flat); padding: 4px; border-radius: 24px; background: var(--pin); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .wgrid-scroll { border-radius: 20px; }
+  .wgrid { --issue-w: 144px; --day-w: 68px; --total-w: 64px; }
+  .ghead > .hcell:first-child, .issue { position: sticky; left: 0; z-index: 2; background: var(--pin); }
+  .issue { padding-left: 12px; }
+  .dh { padding-left: 6px; padding-right: 6px; }
+  /* each row's hairline runs under the column, so the column draws its own piece of it */
+  .wrow + .wrow > .issue::before { content: ""; position: absolute; top: 0; left: 14px; right: 0; height: 1px; background: var(--hair); pointer-events: none; }
+  .wrow.ghead + .wrow > .issue::before, .wrow.section + .wrow > .issue::before { opacity: 0; }
+  /* once the week has moved, a soft edge shows the days going under the column */
+  .wgrid-scroll[data-scrolled] .ghead > .hcell:first-child::after,
+  .wgrid-scroll[data-scrolled] .issue::after { content: ""; position: absolute; top: 0; bottom: 0; left: 100%; width: 12px; background: linear-gradient(to right, var(--pin-shade), transparent); pointer-events: none; }
+  /* in the suggestions panel: the same base, plus the panel's own tint */
+  .sugg .issue { padding-left: calc(12px - var(--sugg-in)); border-radius: calc(18px - var(--sugg-in)) 0 0 calc(18px - var(--sugg-in)); background: linear-gradient(var(--sugg-tint), var(--sugg-tint)), var(--pin); }
+  .sugg .wrow + .wrow > .issue::before { left: calc(14px - var(--sugg-in)); }
   .sugg .rtotal { padding-right: calc(12px - var(--sugg-in)); }
-  .wrow:where(:not(.ghead, .section, .addline)):hover .issue { background: linear-gradient(var(--field), var(--field)), color-mix(in srgb, var(--paper-solid) 92%, transparent); }
-  .sugg .wrow.ghost-row:hover .issue { background: linear-gradient(var(--accent-wash), var(--accent-wash)), linear-gradient(color-mix(in oklab, var(--accent) 5%, transparent), color-mix(in oklab, var(--accent) 5%, transparent)), color-mix(in srgb, var(--paper-solid) 92%, transparent); }
   .play:not(.on) { display: none; }
   /* rows to sort: no icon column, and the choose button shrinks to its plus */
   .src-icon { display: none; }
+  .sort-row .issue { gap: 4px; padding-right: 4px; }
   .pick-btn { width: 26px; padding: 0; justify-content: center; }
   .pick-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* choosing an issue for one: the search gets the visible width of the row */
+  .sort-row.picking > .issue { grid-column: 1 / -1; width: calc(100cqw - 2 * var(--sugg-in)); padding-right: calc(14px - var(--sugg-in)); }
+  .sort-row.picking > :not(.issue) { display: none; }
   .sugg .wrow.section.sub .section-label { padding-left: 0; }
   .isum { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13.5px; line-height: 1.3; }
   .rtotal { padding-right: 12px; }
   .ghost { padding: 0 8px; gap: 3px; }
   .ghost .icon { display: none; }
   .dock-wrap { bottom: 12px; padding: 0 10px; }
+  .preview { padding: 9px 16px; gap: 3px 12px; }
+  .tok-sub { max-width: none; }
   .dock-row { gap: 8px; }
   .dock { height: 56px; }
   .glass.submit { height: 56px; padding: 0 8px 0 16px; }
   .dock-kbd { display: none; }
   .chip-issue { display: none; }
+}
+/* a narrow window with a mouse: the pinned cell hovers with its row */
+@media (max-width: 760px) and (hover: hover) {
+  .wrow:where(:not(.ghead, .section, .addline)):hover > .issue { border-radius: 18px 0 0 18px; background: linear-gradient(var(--field), var(--field)), var(--pin); }
+  .wrow:hover > .issue::before, .wrow:hover + .wrow > .issue::before { opacity: 0; }
+  .sugg .wrow.ghost-row:hover > .issue { border-radius: calc(18px - var(--sugg-in)) 0 0 calc(18px - var(--sugg-in)); background: linear-gradient(var(--accent-wash), var(--accent-wash)), linear-gradient(var(--sugg-tint), var(--sugg-tint)), var(--pin); }
 }
 @media (max-width: 560px) {
   .act-label, .submit-label { display: none; }
@@ -988,6 +1032,25 @@ kbd { font-family: var(--mono); }
   .toast-wrap { bottom: 84px; }
   .change { grid-template-columns: 18px minmax(0, 1fr) 54px 56px; }
   .change .tag { display: none; }
+  /* sheets: the same margin all round, and more of the width for what's in them */
+  .scrim { padding: 12px; }
+  .sheet { border-radius: 28px; }
+  .sheet-head { padding: 20px 14px 6px 22px; }
+  .sheet-body { gap: 12px; padding: 6px 12px 8px; }
+  .sheet-foot { padding: 12px 14px 14px; }
+  /* work days go under their label, spread across the row, big enough for a thumb */
+  .srow.days { flex-direction: column; align-items: stretch; gap: 10px; padding-top: 12px; padding-bottom: 14px; }
+  .srow.days .daypick { justify-content: space-between; }
+  .daybtn { width: 38px; height: 38px; font-size: 13px; }
+}
+
+/* ---------- touch screens ---------- */
+
+@media (hover: none) and (pointer: coarse) {
+  /* iOS zooms the page into any field under 16px when it gets focus */
+  .srow input, .ed-row input, .item input, .field input, .addissue-field input, .addissue.compact .addissue-field input { font-size: 16px; }
+  /* the page stays put behind an open sheet */
+  :root.sheet-open, :root.sheet-open body { overflow: hidden; }
 }
 
 /* ---------- accessibility settings ---------- */
@@ -999,12 +1062,14 @@ kbd { font-family: var(--mono); }
     backdrop-filter: none !important;
   }
   .glass, .glass-strong, .paper, .glass.toast, .glass.setup { background: var(--paper-solid); }
+  .paper { --pin: var(--paper-solid); }
   .glass.submit { background: var(--accent-fill); }
 }
 @media (prefers-contrast: more) {
   :root { --ink-2: var(--ink); --ink-3: rgb(13 20 36 / 0.78); --hair: rgb(13 20 36 / 0.28); --hair-2: rgb(13 20 36 / 0.4); }
   :root[data-theme="dark"] { --ink-2: var(--ink); --ink-3: rgb(238 242 250 / 0.82); --hair: rgb(255 255 255 / 0.3); --hair-2: rgb(255 255 255 / 0.42); }
   .glass, .paper, .glass-strong, .glass.toast, .glass.setup { background: var(--paper-solid); box-shadow: inset 0 0 0 1px var(--ink); }
+  .paper { --pin: var(--paper-solid); }
   .glass.submit { background: var(--accent-fill); }
 }
 /* Same selector as the dark tokens, so these win over them. */
