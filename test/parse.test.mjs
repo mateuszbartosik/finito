@@ -84,7 +84,7 @@ test('words pick an issue when exactly one title matches best', () => {
 test('a day must be given outside the current week', () => {
   const r = parseQuick('APP-1207 1h', { dates, today: '2026-11-05', issues });
   assert.equal(r.dates, null);
-  assert.match(r.dayError, /Which day/);
+  assert.match(r.dayError, /mon…sun, today or yesterday/);
 });
 
 test('type names resolve by prefix', () => {
