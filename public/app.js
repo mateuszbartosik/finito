@@ -141,19 +141,6 @@ const RESULTS_MAX = 212;
 const QUARTERS = Array.from({ length: 96 }, (_, i) => pad(Math.floor(i / 4)) + ':' + pad((i % 4) * 15));
 let selectCount = 0;
 
-// A touch screen (a phone, a tablet without a mouse) gets the platform's own pickers.
-const TOUCH = window.matchMedia ? window.matchMedia('(hover: none) and (pointer: coarse)') : null;
-function useTouch() {
-  const [on, setOn] = useState(() => !!(TOUCH && TOUCH.matches));
-  useEffect(() => {
-    if (!TOUCH) return undefined;
-    const f = () => setOn(TOUCH.matches);
-    if (TOUCH.addEventListener) TOUCH.addEventListener('change', f); else TOUCH.addListener(f);
-    return () => { if (TOUCH.removeEventListener) TOUCH.removeEventListener('change', f); else TOUCH.removeListener(f); };
-  }, []);
-  return on;
-}
-
 // Renders its children into a layer on <body>.
 function Layer({ children }) {
   const host = useRef(null);
@@ -171,7 +158,6 @@ function Layer({ children }) {
 }
 
 function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill', fill = false, align = 'auto', minWidth = 0, maxListHeight = 296 }) {
-  const native = useTouch();
   const [uid] = useState(() => id || 'sel-' + (++selectCount));
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(false); // the surface exists, also while it folds back
@@ -201,7 +187,7 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
     // offsetWidth, not getBoundingClientRect: a sheet still rising (scaled) would measure short and clip the label.
     const m = t.querySelector('.sel-measure').offsetWidth + 1;
     t.style.width = Math.max(minWidth, Math.ceil(m + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight))) + 'px';
-  }, [cur.label, minWidth, fill, native]);
+  }, [cur.label, minWidth, fill]);
 
   const measure = () => {
     const t = trig.current;
@@ -399,21 +385,6 @@ function Select({ id, value, options, onChange, labelledBy, label, shape = 'pill
 
   const listId = uid + '-list';
   const chevron = html`<span class="sel-chev"><${Icon} name="chevron" size=${16} stroke=${1.75} /></span>`;
-  // Touch: a real <select> takes the tap and opens the platform's picker (the wheel on an iPhone, a list on
-  // Android); the trigger under it is only the look, sized and rolling as above.
-  if (native) {
-    return html`<span class=${'sel native' + (fill ? ' fill' : '')}>
-      <select id=${uid} class="sel-native" value=${cur.value}
-        aria-labelledby=${labelledBy || undefined} aria-label=${labelledBy ? undefined : label}
-        onChange=${(e) => { const o = options.find((x) => x.value === e.target.value); if (o && !o.disabled && o.value !== value) onChange(o.value); }}>
-        ${options.map((o) => html`<option key=${o.value} value=${o.value} disabled=${!!o.disabled} selected=${o.value === cur.value}>${o.meta ? `${o.label} (${o.meta})` : o.label}</option>`)}
-      </select>
-      <span ref=${trig} class=${'sel-trigger' + (shape === 'field' ? ' sel-field' : '')} aria-hidden="true">
-        <span class="sel-measure">${cur.label}</span>
-        <span key=${cur.value} class=${'sel-value' + roll}>${cur.label}</span>${chevron}
-      </span>
-    </span>`;
-  }
   const surface = shown ? html`<${Layer}>
     <div ref=${surf} class=${'glass glass-strong sel-surface' + (shape === 'field' ? ' sel-field' : '')}>
       <div class="sel-head" aria-hidden="true" onPointerDown=${(e) => e.preventDefault()} onClick=${() => setOpen(false)}>

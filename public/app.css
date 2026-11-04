@@ -565,10 +565,6 @@ kbd { font-family: var(--mono); }
 @keyframes sel-roll-up { from { opacity: 0; transform: translateY(65%); } }
 @keyframes sel-roll-down { from { opacity: 0; transform: translateY(-65%); } }
 .sel-chev { position: absolute; top: 50%; right: 12px; display: flex; width: 16px; height: 16px; margin-top: -8px; color: var(--ink-3); transition: transform 0.3s var(--ease-settle); }
-/* On a touch screen the platform's own picker opens instead (the wheel on an iPhone): a real <select> lies
-   over the trigger, invisible, and takes the tap. At 16px iOS doesn't zoom in when it gets focus. */
-.sel-native { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; font: inherit; font-size: 16px; color: transparent; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.sel-native:focus + .sel-trigger { box-shadow: inset 0 0 0 2px var(--accent); }
 
 .sel-layer { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
 .glass.sel-surface {
@@ -982,7 +978,7 @@ kbd { font-family: var(--mono); }
      glass, so the column can be exactly the paper and hide the days passing under it. */
   .paper { --pin: var(--paper-flat); padding: 4px; border-radius: 24px; background: var(--pin); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .wgrid-scroll { border-radius: 20px; }
-  .wgrid { --issue-w: 144px; --day-w: 68px; --total-w: 64px; }
+  .wgrid { --issue-w: 148px; --day-w: 68px; --total-w: 64px; }
   .ghead > .hcell:first-child, .issue { position: sticky; left: 0; z-index: 2; background: var(--pin); }
   .issue { padding-left: 12px; }
   .dh { padding-left: 6px; padding-right: 6px; }
@@ -991,7 +987,8 @@ kbd { font-family: var(--mono); }
   .wrow.ghead + .wrow > .issue::before, .wrow.section + .wrow > .issue::before { opacity: 0; }
   /* once the week has moved, a soft edge shows the days going under the column */
   .wgrid-scroll[data-scrolled] .ghead > .hcell:first-child::after,
-  .wgrid-scroll[data-scrolled] .issue::after { content: ""; position: absolute; top: 0; bottom: 0; left: 100%; width: 12px; background: linear-gradient(to right, var(--pin-shade), transparent); pointer-events: none; }
+  .wgrid-scroll[data-scrolled] .issue::after,
+  .wgrid-scroll[data-scrolled] .sugg .wrow.section.sub::after { content: ""; position: absolute; top: 0; bottom: 0; left: 100%; width: 12px; background: linear-gradient(to right, var(--pin-shade), transparent); pointer-events: none; }
   /* in the suggestions panel: the same base, plus the panel's own tint */
   .sugg .issue { padding-left: calc(12px - var(--sugg-in)); border-radius: calc(18px - var(--sugg-in)) 0 0 calc(18px - var(--sugg-in)); background: linear-gradient(var(--sugg-tint), var(--sugg-tint)), var(--pin); }
   .sugg .wrow + .wrow > .issue::before { left: calc(14px - var(--sugg-in)); }
@@ -1005,6 +1002,9 @@ kbd { font-family: var(--mono); }
   /* choosing an issue for one: the search gets the visible width of the row */
   .sort-row.picking > .issue { grid-column: 1 / -1; width: calc(100cqw - 2 * var(--sugg-in)); padding-right: calc(14px - var(--sugg-in)); }
   .sort-row.picking > :not(.issue) { display: none; }
+  /* the panel's sub-headings (Not tied to an issue yet, Show more) belong to the pinned column: its width,
+     its text inset and its edge, and they stick where its cells do */
+  .sugg .wrow.section.sub { left: 0; width: calc(var(--issue-w) - var(--sugg-in)); padding-left: calc(12px - var(--sugg-in)); padding-right: 4px; }
   .sugg .wrow.section.sub .section-label { padding-left: 0; }
   .isum { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13.5px; line-height: 1.3; }
   .rtotal { padding-right: 12px; }
